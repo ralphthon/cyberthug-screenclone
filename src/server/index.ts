@@ -4,6 +4,7 @@ import multer, { type FileFilterCallback } from 'multer';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
+import { AnalysisError, analyzeSessionScreenshots } from './visionAnalyzer.js';
 
 type ApiErrorCode =
   | 'NO_FILES'
@@ -11,16 +12,25 @@ type ApiErrorCode =
   | 'FILE_TOO_LARGE'
   | 'TOO_MANY_FILES'
   | 'UPLOAD_FAILED'
+  | 'INVALID_REQUEST'
+  | 'SESSION_NOT_FOUND'
+  | 'IMAGE_NOT_FOUND'
+  | 'ANALYSIS_FAILED'
+  | 'ANALYSIS_TIMEOUT'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'PROVIDER_FAILURE'
   | 'INTERNAL_ERROR';
 
 class ApiError extends Error {
   public readonly code: ApiErrorCode;
   public readonly status: number;
+  public readonly details?: Record<string, unknown>;
 
-  constructor(message: string, code: ApiErrorCode, status: number) {
+  constructor(message: string, code: ApiErrorCode, status: number, details?: Record<string, unknown>) {
     super(message);
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -207,9 +217,61 @@ app.post('/api/upload', (req: Request, res: Response, next: NextFunction) => {
   });
 });
 
+const parseImageIndex = (rawValue: unknown): number | undefined => {
+  if (rawValue === undefined || rawValue === null || rawValue === '') {
+    return undefined;
+  }
+
+  const parsedValue =
+    typeof rawValue === 'number'
+      ? rawValue
+      : typeof rawValue === 'string'
+        ? Number(rawValue)
+        : Number.NaN;
+
+  if (!Number.isInteger(parsedValue) || parsedValue < 0) {
+    throw new ApiError('imageIndex must be a non-negative integer', 'INVALID_REQUEST', 400);
+  }
+
+  return parsedValue;
+};
+
+app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sessionId =
+      typeof req.body?.sessionId === 'string' && req.body.sessionId.trim().length > 0
+        ? req.body.sessionId.trim()
+        : null;
+
+    if (!sessionId) {
+      throw new ApiError('sessionId is required', 'INVALID_REQUEST', 400);
+    }
+
+    const imageIndex = parseImageIndex(req.body?.imageIndex);
+    const analysis = await analyzeSessionScreenshots({
+      sessionId,
+      imageIndex,
+    });
+
+    res.status(200).json(analysis);
+  } catch (error) {
+    if (error instanceof AnalysisError) {
+      const responseDetails = error.retryable ? { retryable: true, retryAfterSeconds: 10 } : undefined;
+      next(new ApiError(error.message, error.code as ApiErrorCode, error.status, responseDetails));
+      return;
+    }
+
+    next(error);
+  }
+});
+
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof ApiError) {
-    res.status(err.status).json({ error: err.message, code: err.code });
+    const payload: Record<string, unknown> = { error: err.message, code: err.code };
+    if (err.details) {
+      Object.assign(payload, err.details);
+    }
+    res.status(err.status).json(payload);
     return;
   }
 

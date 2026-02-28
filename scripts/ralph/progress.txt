@@ -9,6 +9,7 @@
 - For server uploads, attach per-request session metadata to the Express request before Multer runs, and always clean up the session temp directory immediately on failed upload paths.
 - In TypeScript, Multer `diskStorage.destination` callbacks must still pass the second `destination` argument even on error paths to satisfy callback typing.
 - For long-running backend workers, isolate orchestration in a manager class (spawn + ring buffer + fs.watch progress parsing) and always wire server `SIGTERM`/`SIGINT` to graceful child-process shutdown.
+- For backend provider errors, never return raw upstream error bodies to clients; sanitize to status-level summaries to avoid accidental credential leakage.
 
 ## 2026-02-28 07:26:01 UTC - US-001
 - Implemented initial ScreenClone scaffold with Vite + React + TypeScript + Tailwind frontend, Express backend, shared types, and root tooling/scripts.
@@ -163,4 +164,31 @@
 - **Learnings for future iterations:**
   - Use module augmentation on `express-serve-static-core` `Request` for request-scoped upload metadata used by Multer destination callbacks.
   - Always remove partially-created upload session directories on failed validation paths to keep `/tmp/ralphton-*` clean between periodic cleanup sweeps.
+---
+## 2026-02-28 13:50:24 UTC - US-005
+- Implemented `POST /api/analyze` with request validation for `{ sessionId, imageIndex? }`, 404 behavior for missing sessions, and typed JSON error responses for invalid requests and analysis failures.
+- Added a new backend analyzer module with session image discovery, base64 encoding, structured vision prompt generation, provider fallback flow (OpenAI -> Anthropic when both are configured), and a 60-second analysis timeout.
+- Added per-session analysis caching keyed by `sessionId` + `imageIndex` to prevent duplicate LLM calls for repeated requests in the same session context.
+- Implemented OpenAI/Anthropic response parsing and normalization into the required schema:
+  - `layout: { type, direction, sections[] }`
+  - `colorPalette: { primary, secondary, background, text, accent }`
+  - `components: [{ type, position, props[] }]`
+  - `textContent`, `fonts`, `responsiveHints`
+- Hardened failure-path security by sanitizing upstream provider errors to status-only details so response payloads never leak raw provider diagnostic bodies.
+- Files changed: `src/server/index.ts`, `src/server/visionAnalyzer.ts`, `src/shared/types/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed for project root (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+  - Runtime API probes passed for:
+    - `GET /api/health` -> 200
+    - `POST /api/analyze` with missing `sessionId` -> 400 `INVALID_REQUEST`
+    - `POST /api/analyze` with unknown `sessionId` -> 404 `SESSION_NOT_FOUND`
+    - `POST /api/analyze` with sample session and invalid provider keys -> 500 `ANALYSIS_FAILED` with retry metadata
+- Image-analysis observation: Not applicable (backend API story, no UI changes).
+- **Learnings for future iterations:**
+  - Keep vision model outputs normalized through a coercion layer before returning API responses so schema drift from providers does not break clients.
+  - Cache expensive per-session analysis by request key (`sessionId` + image selector) to keep reconnect/reload workflows fast and reduce duplicate provider usage.
 ---
