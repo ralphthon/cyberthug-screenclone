@@ -10,6 +10,8 @@
 - In TypeScript, Multer `diskStorage.destination` callbacks must still pass the second `destination` argument even on error paths to satisfy callback typing.
 - For long-running backend workers, isolate orchestration in a manager class (spawn + ring buffer + fs.watch progress parsing) and always wire server `SIGTERM`/`SIGINT` to graceful child-process shutdown.
 - For backend provider errors, never return raw upstream error bodies to clients; sanitize to status-level summaries to avoid accidental credential leakage.
+- For multi-session Ralph orchestration, copy `scripts/ralph` into a per-session runtime (`/tmp/ralphton-{sessionId}/workspace/ralph-runtime`) so each process gets isolated `prd.json` and `progress.txt` files.
+
 
 ## 2026-02-28 07:26:01 UTC - US-001
 - Implemented initial ScreenClone scaffold with Vite + React + TypeScript + Tailwind frontend, Express backend, shared types, and root tooling/scripts.
@@ -191,4 +193,22 @@
 - **Learnings for future iterations:**
   - Keep vision model outputs normalized through a coercion layer before returning API responses so schema drift from providers does not break clients.
   - Cache expensive per-session analysis by request key (`sessionId` + image selector) to keep reconnect/reload workflows fast and reduce duplicate provider usage.
+---
+## 2026-02-28 14:02:18 UTC - US-006
+- Implemented `RalphProcessManager` with required lifecycle APIs: `start(sessionId, config)`, `stop(sessionId)`, `getStatus(sessionId)`, and `getOutput(sessionId, lastN)`.
+- Added per-session runtime preparation that generates a session-specific `prd.json` from clone config + analysis data, seeds `progress.txt`, and spawns `ralph.sh --tool omx --images-dir <session-images-dir> <maxIterations>` from an isolated workspace.
+- Added child-process stdout/stderr ring buffer capture (last 500 lines), iteration parsing from `Ralph Iteration N of M`, completion detection from `<promise>COMPLETE</promise>`, failure detection from non-zero exits, and `fs.watch` incremental progress parsing that emits `iteration-complete` events.
+- Enforced session state machine transitions (`idle -> uploading -> analyzing -> cloning -> completed|failed`) and configurable max concurrency via `RALPH_MAX_SESSIONS` (default 3).
+- Wired server shutdown to call manager `shutdown()` so active child processes receive `SIGTERM` during `SIGINT`/`SIGTERM`.
+- Files changed: `src/server/ralphProcessManager.ts`, `src/server/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation: Not applicable (backend orchestration story, no UI changes).
+- **Learnings for future iterations:**
+  - Keep ralph runtime artifacts session-scoped (copied script + prompts + PRD/progress) to avoid cross-session state collisions when multiple loops run concurrently.
+  - Parse progress deltas using byte offsets after `fs.watch` events to avoid duplicate reads and retain deterministic event emission.
 ---

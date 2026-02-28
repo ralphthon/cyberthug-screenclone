@@ -4,6 +4,7 @@ import multer, { type FileFilterCallback } from 'multer';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
+import { RalphProcessManager } from './ralphProcessManager.js';
 import { AnalysisError, analyzeSessionScreenshots } from './visionAnalyzer.js';
 
 type ApiErrorCode =
@@ -43,6 +44,7 @@ declare module 'express-serve-static-core' {
 
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
+const ralphProcessManager = new RalphProcessManager();
 
 const UPLOAD_FIELD_NAME = 'screenshots';
 const MAX_FILES = 5;
@@ -282,10 +284,18 @@ const server = app.listen(port, () => {
   console.log(`ScreenClone backend listening on http://localhost:${port}`);
 });
 
+let isShuttingDown = false;
 const shutdown = (): void => {
+  if (isShuttingDown) {
+    return;
+  }
+
+  isShuttingDown = true;
   clearInterval(cleanupTimer);
-  server.close(() => {
-    process.exit(0);
+  void ralphProcessManager.shutdown().finally(() => {
+    server.close(() => {
+      process.exit(0);
+    });
   });
 };
 
