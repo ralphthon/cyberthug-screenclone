@@ -29,7 +29,9 @@ sudo apt-get install -y nodejs
 npm install
 
 # 5. Set API keys (REQUIRED — app won't work without OPENAI_API_KEY)
-export OPENAI_API_KEY="sk-your-openai-key"          # Required
+# We use LayoffLabs proxy — OpenAI-compatible API (same key for all providers)
+export OPENAI_API_KEY="your-layofflabs-api-key"      # Required
+export OPENAI_BASE_URL="https://api.layofflabs.com/v1"  # Required — LayoffLabs proxy
 export DASHSCOPE_API_KEY="your-dashscope-key"        # Optional (for Live2D TTS voice)
 
 # 6. Verify everything
@@ -97,16 +99,20 @@ This installs all packages including Puppeteer (which auto-downloads Chromium), 
 Create a `.env` file in the project root or export directly:
 
 ```bash
-# Required — OpenAI API key (for Vision verdict + Codex agent)
-export OPENAI_API_KEY="sk-your-openai-key"
+# Required — LayoffLabs proxy (OpenAI-compatible, same key for all providers)
+export OPENAI_API_KEY="your-layofflabs-api-key"
+export OPENAI_BASE_URL="https://api.layofflabs.com/v1"
 
 # Optional — for OpenWaifu Qwen3 TTS voice
 export DASHSCOPE_API_KEY="your-dashscope-key"
 ```
 
+> **Note:** We use the LayoffLabs API proxy (`api.layofflabs.com`) instead of direct OpenAI. It's OpenAI-compatible so all SDKs work out of the box — just set `OPENAI_BASE_URL`.
+
 > **Tip:** Add these to your `~/.bashrc` or `~/.zshrc` so they persist across sessions:
 > ```bash
-> echo 'export OPENAI_API_KEY="sk-your-key"' >> ~/.bashrc
+> echo 'export OPENAI_API_KEY="your-key"' >> ~/.bashrc
+> echo 'export OPENAI_BASE_URL="https://api.layofflabs.com/v1"' >> ~/.bashrc
 > source ~/.bashrc
 > ```
 
@@ -171,7 +177,8 @@ This starts the ralph iterative loop:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENAI_API_KEY` | **Yes** | OpenAI API key for Vision verdict (GPT-5.3 Codex) + coding agent |
+| `OPENAI_API_KEY` | **Yes** | LayoffLabs API key (OpenAI-compatible proxy for Vision + Codex) |
+| `OPENAI_BASE_URL` | **Yes** | `https://api.layofflabs.com/v1` — LayoffLabs proxy endpoint |
 | `DASHSCOPE_API_KEY` | Optional | Alibaba Cloud key for Qwen3 TTS (OpenWaifu voice) |
 | `RALPH_MAX_SESSIONS` | Optional | Max concurrent ralph sessions (default: 3) |
 | `OPENWAIFU_WS_URL` | Optional | OpenWaifu WebSocket URL (default: `ws://localhost:12393/ws`) |
@@ -241,9 +248,9 @@ Edit `deps/Open-LLM-VTuber/conf.yaml`:
 
 ```yaml
 openai_compatible_llm:
-  base_url: 'https://api.openai.com/v1'    # Your LLM API URL
-  llm_api_key: 'sk-your-key'               # Your API key
-  model: 'gpt-4o'                           # Model to use
+  base_url: 'https://api.layofflabs.com/v1'  # LayoffLabs proxy (OpenAI-compatible)
+  llm_api_key: 'your-layofflabs-api-key'     # Same key as OPENAI_API_KEY
+  model: 'gpt-4o'                             # Model to use
 ```
 
 ### 4. Set TTS API key and start

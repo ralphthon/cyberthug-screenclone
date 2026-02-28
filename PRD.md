@@ -124,8 +124,8 @@ POST /api/analyze sends uploaded screenshots to a vision-capable LLM (OpenAI GPT
 - [ ] Reads images from session temp directory
 - [ ] Sends images as base64 to vision LLM with structured extraction prompt
 - [ ] Returns JSON: { layout: { type, direction, sections[] }, colorPalette: { primary, secondary, background, text, accent }, components: Array<{ type, position, props }>, textContent: string[], fonts: string[], responsiveHints: string[] }
-- [ ] Supports OPENAI_API_KEY env var for GPT-4V, ANTHROPIC_API_KEY for Claude
-- [ ] Falls back to Claude if OpenAI unavailable, and vice versa
+- [ ] Supports OPENAI_API_KEY + OPENAI_BASE_URL env vars (LayoffLabs proxy — OpenAI-compatible)
+- [ ] Falls back gracefully if API unavailable
 - [ ] Timeout: 60 seconds per analysis request
 - [ ] Caches analysis result in session state to avoid re-analyzing same images
 - [ ] Returns 404 if session ID not found, 500 if LLM call fails with retry info
@@ -433,7 +433,7 @@ Backend generates a customized prd.json for each clone session based on the visi
 - [ ] Score + diff image injected back into ralph.sh context via progress.txt update
 - [ ] If ralph.sh generates broken HTML (render fails): log error in progress.txt, continue to next iteration
 - [ ] Session workspace isolated: /tmp/ralphton-{sessionId}/workspace/ with git init
-- [ ] ralph.sh environment: PATH includes omx, OPENAI_API_KEY set from server env
+- [ ] ralph.sh environment: PATH includes omx, OPENAI_API_KEY + OPENAI_BASE_URL set from server env
 - [ ] Typecheck passes
 
 **Notes:** Key insight: ralph.sh manages its own iteration loop. Our backend wraps it with: (1) prd.json generation, (2) render+compare after each iteration, (3) SSE event emission. The feedback loop is: ralph generates code → we render+screenshot → we compare → we update progress.txt with score → ralph reads score on next iteration.
@@ -499,7 +499,7 @@ As a developer, I want ralph-image-analysis to be automatically installed/config
 - [ ] setup.sh verifies codex CLI is available (omx mode requirement)
 - [ ] setup.sh copies visual-verdict skill to appropriate location if needed
 - [ ] package.json postinstall or setup script references setup.sh
-- [ ] Environment variables documented: OPENAI_API_KEY (required for codex/vision), RALPH_MAX_SESSIONS (optional, default 3)
+- [ ] Environment variables documented: OPENAI_API_KEY (required), OPENAI_BASE_URL (required — https://api.layofflabs.com/v1), RALPH_MAX_SESSIONS (optional, default 3)
 - [ ] README.md updated with full setup instructions including ralph-image-analysis dependency
 - [ ] Backend server startup checks ralph.sh path exists and is executable, logs clear error if missing
 - [ ] .gitignore updated to exclude deps/ralph-image-analysis/ (cloned dependency)
