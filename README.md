@@ -75,7 +75,7 @@ export OPENAI_BASE_URL="https://api.layofflabs.com/v1"  # Required — LayoffLab
 export DASHSCOPE_API_KEY="your-dashscope-key"        # Optional (for Live2D TTS voice)
 
 # 6. Verify everything
-./setup.sh
+npm run setup
 
 # 7. Run smoke tests
 npm run test:smoke
@@ -162,7 +162,8 @@ export DASHSCOPE_API_KEY="your-dashscope-key"
 ### Step 6: Verify setup
 
 ```bash
-./setup.sh
+npm run setup
+# (equivalent: ./setup.sh)
 ```
 
 This checks:
@@ -172,6 +173,8 @@ This checks:
 - ✅ uv (for Open-LLM-VTuber)
 - ✅ omx/codex CLI
 - ✅ ralph-image-analysis ready
+- ✅ `deps/ralph-image-analysis/ralph.sh` executable
+- ✅ `visual-verdict` skill synced into `scripts/ralph/skills/`
 - ✅ OpenWaifu ready
 - ✅ Puppeteer system deps
 - ✅ Environment variables
@@ -353,6 +356,10 @@ npm install
 chmod +x scripts/ralph/ralph.sh
 chmod +x deps/ralph-image-analysis/ralph.sh
 ```
+
+### Backend exits with "Ralph runner is missing or not executable"
+- Run `npm run setup` to verify/sync `deps/ralph-image-analysis` and skill files.
+- Ensure `scripts/ralph/ralph.sh` exists and is executable.
 
 ### OpenWaifu WebSocket connection failed
 - Make sure OLV server is running (`uv run run_server.py`)

@@ -2,7 +2,7 @@ import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import JSZip from 'jszip';
 import multer, { type FileFilterCallback } from 'multer';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { CompareError, compareScreenshots } from './compareService.js';
@@ -92,6 +92,7 @@ const ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const ALLOWED_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const SSE_KEEPALIVE_MS = 15_000;
 const MAX_LOOP_EVENT_HISTORY = 200;
+const RALPH_RUNNER_PATH = path.resolve(process.cwd(), 'scripts', 'ralph', 'ralph.sh');
 
 type LoopStartConfig = {
   projectName: string;
@@ -177,6 +178,17 @@ const parseNumericValue = (value: unknown): number | null => {
   }
 
   return null;
+};
+
+const ensureRalphRunnerAvailable = async (): Promise<void> => {
+  try {
+    await fs.access(RALPH_RUNNER_PATH, fsConstants.F_OK | fsConstants.X_OK);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'unknown error';
+    throw new Error(
+      `Ralph runner is missing or not executable at '${RALPH_RUNNER_PATH}'. Run 'npm run setup' first. (${detail})`,
+    );
+  }
 };
 
 const slugifyProjectName = (value: string): string => {
@@ -1730,8 +1742,19 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
 });
 
-const server = app.listen(port, () => {
-  console.log(`ScreenClone backend listening on http://localhost:${port}`);
+let server: ReturnType<typeof app.listen> | null = null;
+
+const startServer = async (): Promise<void> => {
+  await ensureRalphRunnerAvailable();
+  server = app.listen(port, () => {
+    console.log(`ScreenClone backend listening on http://localhost:${port}`);
+  });
+};
+
+void startServer().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[startup] ${message}`);
+  process.exit(1);
 });
 
 let isShuttingDown = false;
@@ -1743,6 +1766,11 @@ const shutdown = (): void => {
   isShuttingDown = true;
   clearInterval(cleanupTimer);
   void Promise.allSettled([ralphProcessManager.shutdown(), closeRenderBrowser()]).finally(() => {
+    if (!server) {
+      process.exit(0);
+      return;
+    }
+
     server.close(() => {
       process.exit(0);
     });

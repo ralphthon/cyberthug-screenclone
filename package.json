@@ -4,6 +4,7 @@
   "private": true,
   "description": "RalphTon ScreenClone app",
   "scripts": {
+    "setup": "bash ./setup.sh",
     "dev": "vite --config src/client/vite.config.ts",
     "server": "tsx watch src/server/index.ts",
     "dev:all": "concurrently -k \"npm run dev\" \"npm run server\"",

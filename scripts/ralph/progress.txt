@@ -25,6 +25,7 @@
 - For Cloney command bridging, keep ScreenClone API orchestration in `App.tsx` and pass typed bridge callbacks/event snapshots into `CloneyPanel` so intent parsing stays UI-local while loop state remains single-sourced from SSE.
 - For Cloney loop narration, centralize SSE-to-chat updates through one helper that both appends local chat bubbles and sends OpenWaifu `text-input` payloads with `sender: system`, emotion tags, and expression-index mapping.
 - For dual-theme retrofits, map Tailwind palette tokens (including `slate` shades) to CSS variables and set the initial `<html>` theme class in `index.html` before React mounts to avoid first-paint theme flash.
+- For backend runtime dependencies, fail fast during server startup with `fs.access(path, F_OK | X_OK)` checks and log an actionable setup command (`npm run setup`) when required scripts are missing.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -465,4 +466,19 @@
 - **Learnings for future iterations:**
   - For reliable no-flash theming in Vite React apps, set `<html>` theme class from a tiny `index.html` bootstrap script before React mounts, then keep React/localStorage in sync.
   - Mapping Tailwind color tokens (including `slate` shades) to CSS variables is an effective low-churn way to retrofit full light/dark support across an existing dark-first UI.
+---
+## 2026-02-28 18:13:43 UTC - US-020
+- Updated setup/install flow for `ralph-image-analysis`: `setup.sh` now enforces dependency presence, verifies `deps/ralph-image-analysis/ralph.sh` is executable, installs dependency npm packages when present, and syncs the `visual-verdict` skill into `scripts/ralph/skills/` when needed.
+- Added package script wiring so setup is runnable via `npm run setup`, and updated README setup docs/troubleshooting to reflect the dependency checks and skill sync behavior.
+- Added backend startup preflight in `src/server/index.ts` to fail fast with a clear error if `scripts/ralph/ralph.sh` is missing or not executable.
+- Files changed: `setup.sh`, `package.json`, `README.md`, `src/server/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+- Image-analysis observation: Not applicable (setup/backend story, no UI visual changes required for this iteration).
+- **Learnings for future iterations:**
+  - Keep setup scripts repo-root-aware (`cd` to script directory first) so they behave consistently from any invocation path, including containers and CI shells.
+  - Syncing runtime skills from dependency source (`deps/ralph-image-analysis/skills/...`) into `scripts/ralph/skills/...` avoids silent drift between local runtime assets and dependency updates.
 ---

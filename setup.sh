@@ -2,6 +2,14 @@
 # setup.sh — ScreenClone (RalphTon) environment setup
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+RALPH_DIR="deps/ralph-image-analysis"
+RALPH_SCRIPT_PATH="$RALPH_DIR/ralph.sh"
+RALPH_VISUAL_VERDICT_SOURCE="$RALPH_DIR/skills/visual-verdict"
+RALPH_VISUAL_VERDICT_TARGET="scripts/ralph/skills/visual-verdict"
+
 echo "🦞 ScreenClone Setup"
 echo ""
 
@@ -48,15 +56,46 @@ fi
 # 6) ralph-image-analysis setup
 echo ""
 echo "📦 Setting up ralph-image-analysis..."
-if [[ -d deps/ralph-image-analysis ]]; then
-  chmod +x deps/ralph-image-analysis/ralph.sh 2>/dev/null || true
-  if [[ -f deps/ralph-image-analysis/package.json ]]; then
-    cd deps/ralph-image-analysis && npm install 2>/dev/null && cd ../..
-  fi
-  echo "  ✅ ralph-image-analysis ready"
-else
-  echo "  ❌ deps/ralph-image-analysis not found"
+if [[ ! -d "$RALPH_DIR" ]]; then
+  echo "  ❌ $RALPH_DIR not found"
+  echo "     This project expects the dependency at $RALPH_DIR."
+  exit 1
 fi
+
+if [[ ! -f "$RALPH_SCRIPT_PATH" ]]; then
+  echo "  ❌ $RALPH_SCRIPT_PATH not found"
+  exit 1
+fi
+
+chmod +x "$RALPH_SCRIPT_PATH"
+if [[ ! -x "$RALPH_SCRIPT_PATH" ]]; then
+  echo "  ❌ Failed to make $RALPH_SCRIPT_PATH executable"
+  exit 1
+fi
+
+if [[ -f "$RALPH_DIR/package.json" ]]; then
+  (
+    cd "$RALPH_DIR"
+    npm install
+  )
+  echo "  ✅ Installed ralph-image-analysis npm dependencies"
+else
+  echo "  ℹ️  No package.json in $RALPH_DIR (skipping npm install)"
+fi
+
+if [[ -d "$RALPH_VISUAL_VERDICT_SOURCE" ]]; then
+  mkdir -p "$(dirname "$RALPH_VISUAL_VERDICT_TARGET")"
+  if [[ ! -f "$RALPH_VISUAL_VERDICT_TARGET/SKILL.md" ]] || [[ "$RALPH_VISUAL_VERDICT_SOURCE/SKILL.md" -nt "$RALPH_VISUAL_VERDICT_TARGET/SKILL.md" ]]; then
+    rm -rf "$RALPH_VISUAL_VERDICT_TARGET"
+    cp -R "$RALPH_VISUAL_VERDICT_SOURCE" "$RALPH_VISUAL_VERDICT_TARGET"
+    echo "  ✅ Synced visual-verdict skill to scripts/ralph/skills"
+  else
+    echo "  ✅ visual-verdict skill already up to date"
+  fi
+else
+  echo "  ⚠️  visual-verdict skill source missing at $RALPH_VISUAL_VERDICT_SOURCE"
+fi
+echo "  ✅ ralph-image-analysis ready"
 
 # 7) Puppeteer system deps check (Linux only)
 echo ""

@@ -465,9 +465,9 @@
         "Docker-compatible: setup.sh works in both local dev and container environments",
         "Typecheck passes"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "ralph-image-analysis is ALREADY included at deps/ralph-image-analysis/ (no need to clone). setup.sh just needs to verify it exists, install its npm deps if any, and check omx CLI availability.",
-      "status": "pending"
+      "status": "passed"
     },
     {
       "id": "US-021",
