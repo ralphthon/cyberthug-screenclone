@@ -329,26 +329,35 @@ Button to download the final generated website as a production-ready ZIP file. I
 
 ---
 
-## US-015: OpenWaifu WebSocket bridge — embed Live2D Cloney in frontend
+## US-015: OpenWaifu WebSocket bridge — embed Live2D Cloney + OLV settings panel in frontend
 
-Integrate OpenWaifu's WebSocket client into the React frontend to render Cloney (WaifuClaw Live2D model) as the primary conversational interface. Cloney appears as a docked panel on the right side with Live2D canvas, chat history, and text input. WebSocket connects to OpenWaifu server (configurable URL).
+Integrate OpenWaifu's WebSocket client into the React frontend. Right-side panel contains: (1) OLV Settings section at top — server URL, LLM model selection, API key, TTS voice, persona toggle, connection test button. (2) Live2D canvas rendering WaifuClaw model in the middle. (3) Chat history with conversation bubbles. (4) Text input at bottom. Panel connects to OpenWaifu/OLV server via WebSocket.
 
 ### Acceptance Criteria
 
-- [ ] Right-side panel (30% width) shows Cloney interface: Live2D canvas (top 50%), chat history (middle 40%), text input (bottom 10%)
+- [ ] Right-side panel (30% width) with 4 sections: OLV Settings (top), Live2D canvas, chat history, text input
+- [ ] OLV Settings section (collapsible with toggle):
+- [ ]   - Server URL input (default ws://localhost:12393/ws, configurable)
+- [ ]   - LLM Model dropdown (OpenAI GPT-4o, Claude 4 Sonnet, Gemini 3 Pro, Ollama local, custom)
+- [ ]   - LLM API Key input (password field with show/hide toggle)
+- [ ]   - LLM Base URL input (for custom endpoints)
+- [ ]   - TTS Voice selector (Sohee default, with preview button)
+- [ ]   - Persona toggle (enable/disable custom persona prompt)
+- [ ]   - Connection test button — pings OLV WebSocket, shows green/red status
+- [ ]   - Save Settings button — persists to localStorage
+- [ ]   - Settings auto-loaded from localStorage on mount
 - [ ] Live2D canvas renders WaifuClaw model via pixi-live2d-display or OpenWaifu's built-in renderer
-- [ ] WebSocket connects to OpenWaifu server URL (default ws://localhost:12393/ws, configurable via env OPENWAIFU_WS_URL)
+- [ ] WebSocket connects using configured server URL from settings
 - [ ] Handles WebSocket message types: text-input (send), audio-play-start (receive), display_text (receive), set-expression (receive)
-- [ ] Chat history shows conversation bubbles: user messages (right, primary color) and Cloney messages (left, card color)
-- [ ] Cloney messages include emotion tags rendered as subtle badges: [joy] → 😊, [sadness] → 😢, [surprise] → 😲, [neutral] → 😐
-- [ ] Text input: Enter to send, Shift+Enter for newline
-- [ ] Connection status indicator: green dot (connected), yellow (connecting), red (disconnected)
-- [ ] Auto-reconnect on WebSocket disconnect with exponential backoff (1s, 2s, 4s, max 30s)
+- [ ] Chat history shows conversation bubbles: user (right, primary) and Cloney (left, card color)
+- [ ] Cloney messages include emotion tags: [joy]→😊, [sadness]→😢, [surprise]→😲, [neutral]→😐
+- [ ] Connection status indicator: green (connected), yellow (connecting), red (disconnected)
+- [ ] Auto-reconnect on disconnect with exponential backoff (1s→30s max)
 - [ ] Panel collapsible via toggle button (saves state to localStorage)
-- [ ] When collapsed: floating Cloney avatar (64x64) in bottom-right with unread count badge
+- [ ] When collapsed: floating Cloney avatar (64x64) in bottom-right with unread badge
 - [ ] Typecheck passes
 
-**Notes:** OpenWaifu WebSocket protocol: send {type: 'text-input', text: '...'}, receive {type: 'audio-play-start', ...} for TTS, {type: 'display_text', ...} for chat. WaifuClaw emotionMap: neutral=11, anger=[0,2,5], disgust=4, fear=10, joy=[3,6], smirk=8, sadness=9, surprise=7.
+**Notes:** OLV settings map to conf.yaml fields: openai_compatible_llm.base_url, openai_compatible_llm.llm_api_key, openai_compatible_llm.model, qwen3_tts.voice. Settings saved to localStorage key: "ralphton-olv-config". On save, optionally POST to OLV /api/config to hot-reload without restart. Connection test: WebSocket open + close within 3s = success.
 
 ---
 
