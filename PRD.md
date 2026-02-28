@@ -461,6 +461,9 @@ As a developer, I want ralph-image-analysis to be automatically installed/config
 - [ ] .gitignore updated to exclude deps/ralph-image-analysis/ (cloned dependency)
 - [ ] Docker-compatible: setup.sh works in both local dev and container environments
 - [ ] Typecheck passes
+
+**Notes:** ralph-image-analysis is ALREADY included at deps/ralph-image-analysis/ (no need to clone). setup.sh just needs to verify it exists, install its npm deps if any, and check omx CLI availability.
+
 ---
 
 ## US-021: OpenWaifu dependency setup and installation script
@@ -485,6 +488,6 @@ As a developer, I want OpenWaifu (Open-LLM-VTuber emotion voice + Live2D model p
 - [ ] package.json script 'setup:waifu' for standalone OpenWaifu setup
 - [ ] Typecheck passes
 
-**Notes:** OpenWaifu repo: https://github.com/HaD0Yun/OpenWaifu.git. Depends on Open-LLM-VTuber v1.2.0+. install.sh copies: qwen3_tts.py, conf.yaml, model_dict.json, live2d-models/WaifuClaw/. DASHSCOPE_API_KEY needed for Alibaba Cloud Qwen3 TTS API.
+**Notes:** OpenWaifu is ALREADY included at deps/OpenWaifu/ (no need to clone). setup.sh just needs to verify it exists, check install.sh is executable, and document DASHSCOPE_API_KEY. Open-LLM-VTuber still needs to be cloned separately if not present.
 
 ---
