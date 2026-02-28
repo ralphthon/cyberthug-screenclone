@@ -10,3 +10,116 @@ body {
   margin: 0;
   min-width: 320px;
 }
+
+.loading-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  border: 3px solid rgba(148, 163, 184, 0.3);
+  border-top-color: rgba(129, 140, 248, 0.9);
+  animation: spin 0.8s linear infinite;
+}
+
+.running-card {
+  animation: pulse-border 1.4s ease-in-out infinite;
+}
+
+.timeline-card-enter {
+  animation: timeline-card-slide-in 0.28s ease-out both;
+}
+
+.success-banner {
+  animation: shimmer 2.4s ease-in-out infinite;
+}
+
+.confetti-dot {
+  position: absolute;
+  width: 6px;
+  height: 10px;
+  border-radius: 2px;
+  opacity: 0.9;
+  animation: confetti-fall 1.6s linear infinite;
+}
+
+.confetti-dot-a {
+  left: 10%;
+  top: -14px;
+  background: #fde68a;
+}
+
+.confetti-dot-b {
+  left: 36%;
+  top: -10px;
+  background: #86efac;
+  animation-delay: 0.2s;
+}
+
+.confetti-dot-c {
+  left: 64%;
+  top: -12px;
+  background: #7dd3fc;
+  animation-delay: 0.4s;
+}
+
+.confetti-dot-d {
+  left: 86%;
+  top: -16px;
+  background: #c4b5fd;
+  animation-delay: 0.6s;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes timeline-card-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-border {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(129, 140, 248, 0.65);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(129, 140, 248, 0.05);
+  }
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-4px) rotate(0deg);
+    opacity: 0;
+  }
+
+  30% {
+    opacity: 0.95;
+  }
+
+  100% {
+    transform: translateY(56px) rotate(240deg);
+    opacity: 0;
+  }
+}
+
+@keyframes shimmer {
+  0%,
+  100% {
+    background-color: rgba(16, 185, 129, 0.12);
+  }
+
+  50% {
+    background-color: rgba(16, 185, 129, 0.2);
+  }
+}

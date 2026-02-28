@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3001';
+
 const MAX_FILES = 5;
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const ACCEPTED_FILE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const CONFIG_STORAGE_KEY = 'ralphton-config';
+const SSE_RECONNECT_MS = 3_000;
 
 type Toast = {
   id: number;
@@ -26,6 +29,58 @@ type CloneConfig = {
 type CloneConfigField = keyof CloneConfig;
 
 type CloneConfigErrors = Partial<Record<CloneConfigField, string>>;
+
+type LoopStatus = 'idle' | 'running' | 'complete' | 'error';
+
+type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
+type IterationState = 'running' | 'complete' | 'error';
+
+type LoopEventName = 'iteration-start' | 'iteration-complete' | 'loop-complete' | 'loop-error';
+
+type LoopStartRequest = {
+  sessionId: string;
+  config: {
+    projectName: string;
+    maxIterations: number;
+    targetScore: number;
+    githubUrl?: string;
+    githubToken?: string;
+  };
+};
+
+type LoopStartResponse = {
+  sessionId: string;
+  state: string;
+  currentIteration: number;
+  maxIterations: number;
+  targetScore: number;
+  startedAt: string | null;
+};
+
+type IterationCard = {
+  iteration: number;
+  maxIterations: number | null;
+  state: IterationState;
+  score: number | null;
+  previousScore: number | null;
+  delta: number | null;
+  feedbackSnippet: string;
+  screenshotBase64: string | null;
+  diffImageBase64: string | null;
+  codePreview: string | null;
+  commitUrl: string | null;
+  elapsedMs: number | null;
+  error: string | null;
+};
+
+type UploadResponse = {
+  sessionId: string;
+};
+
+type ApiErrorResponse = {
+  error?: string;
+};
 
 const DEFAULT_CLONE_CONFIG: CloneConfig = {
   projectName: '',
@@ -56,9 +111,120 @@ function coerceStoredConfig(value: unknown): CloneConfig | null {
   };
 }
 
+function parseNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  return null;
+}
+
+function parseString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseEventData(rawData: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(rawData) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function deriveFeedbackSnippet(score: number | null, delta: number | null, fallback: string | null): string {
+  if (typeof delta === 'number') {
+    if (delta > 0) {
+      return `Improved by +${delta.toFixed(2)} points this iteration.`;
+    }
+
+    if (delta < 0) {
+      return `Dropped by ${delta.toFixed(2)} points this iteration.`;
+    }
+
+    return 'Score held steady from the previous iteration.';
+  }
+
+  if (typeof score === 'number') {
+    return `Scored ${score.toFixed(2)} on this iteration.`;
+  }
+
+  if (fallback && fallback.length > 0) {
+    return fallback;
+  }
+
+  return 'Iteration update received.';
+}
+
+function formatDelta(delta: number | null): string {
+  if (delta === null) {
+    return 'n/a';
+  }
+
+  const prefix = delta > 0 ? '+' : '';
+  return `${prefix}${delta.toFixed(2)}`;
+}
+
+function getScoreColorClass(score: number | null): string {
+  if (score === null) {
+    return 'text-slate-300';
+  }
+
+  if (score < 50) {
+    return 'text-red-400';
+  }
+
+  if (score <= 80) {
+    return 'text-yellow-400';
+  }
+
+  return 'text-green-400';
+}
+
+async function parseApiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as ApiErrorResponse;
+    if (typeof body.error === 'string' && body.error.trim().length > 0) {
+      return body.error;
+    }
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function toDataUrl(base64: string | null): string | null {
+  if (!base64) {
+    return null;
+  }
+
+  return `data:image/png;base64,${base64}`;
+}
+
 function App(): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toastTimersRef = useRef<number[]>([]);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const processedEventIdsRef = useRef<Set<number>>(new Set());
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const newestAnchorRef = useRef<HTMLDivElement | null>(null);
+  const isAtNewestRef = useRef(true);
+  const loopStatusRef = useRef<LoopStatus>('idle');
+
   const [files, setFiles] = useState<File[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -67,10 +233,28 @@ function App(): JSX.Element {
   const [showGithubToken, setShowGithubToken] = useState(false);
   const [isCloneRunning, setIsCloneRunning] = useState(false);
 
+  const [loopSessionId, setLoopSessionId] = useState<string | null>(null);
+  const [loopStatus, setLoopStatus] = useState<LoopStatus>('idle');
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
+  const [loopErrorMessage, setLoopErrorMessage] = useState<string | null>(null);
+  const [loopSummary, setLoopSummary] = useState<{ finalScore: number | null; bestIteration: number | null } | null>(
+    null,
+  );
+  const [expandedIteration, setExpandedIteration] = useState<number | null>(null);
+  const [iterationCards, setIterationCards] = useState<Record<number, IterationCard>>({});
+
   const previews = useMemo<PreviewItem[]>(
     () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
     [files],
   );
+
+  const orderedIterations = useMemo(() => {
+    return Object.values(iterationCards).sort((a, b) => b.iteration - a.iteration);
+  }, [iterationCards]);
+
+  useEffect(() => {
+    loopStatusRef.current = loopStatus;
+  }, [loopStatus]);
 
   useEffect(() => {
     return () => {
@@ -85,6 +269,12 @@ function App(): JSX.Element {
       for (const timerId of toastTimersRef.current) {
         window.clearTimeout(timerId);
       }
+
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+      }
+
+      eventSourceRef.current?.close();
     };
   }, []);
 
@@ -106,6 +296,45 @@ function App(): JSX.Element {
     }
   }, []);
 
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    const anchor = newestAnchorRef.current;
+
+    if (!container || !anchor) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry) {
+          isAtNewestRef.current = entry.isIntersecting;
+        }
+      },
+      {
+        root: container,
+        threshold: 1,
+      },
+    );
+
+    observer.observe(anchor);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAtNewestRef.current) {
+      return;
+    }
+
+    scrollContainerRef.current?.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+  }, [orderedIterations.length]);
+
   const addToast = useCallback((message: string) => {
     const toastId = Date.now() + Math.floor(Math.random() * 1000);
     setToasts((previous) => [...previous, { id: toastId, message }]);
@@ -117,6 +346,200 @@ function App(): JSX.Element {
 
     toastTimersRef.current.push(timerId);
   }, []);
+
+  const closeEventStream = useCallback(() => {
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  const upsertIterationCard = useCallback((iteration: number, update: Partial<IterationCard>) => {
+    setIterationCards((previous) => {
+      const existing = previous[iteration];
+      const fallbackScore = parseNumber(update.score) ?? existing?.score ?? null;
+      const fallbackDelta = parseNumber(update.delta) ?? existing?.delta ?? null;
+      const nextCard: IterationCard = {
+        iteration,
+        maxIterations: parseNumber(update.maxIterations) ?? existing?.maxIterations ?? null,
+        state: update.state ?? existing?.state ?? 'running',
+        score: fallbackScore,
+        previousScore: parseNumber(update.previousScore) ?? existing?.previousScore ?? null,
+        delta: fallbackDelta,
+        feedbackSnippet:
+          update.feedbackSnippet ??
+          existing?.feedbackSnippet ??
+          deriveFeedbackSnippet(fallbackScore, fallbackDelta, parseString(update.codePreview) ?? null),
+        screenshotBase64: parseString(update.screenshotBase64) ?? existing?.screenshotBase64 ?? null,
+        diffImageBase64: parseString(update.diffImageBase64) ?? existing?.diffImageBase64 ?? null,
+        codePreview: parseString(update.codePreview) ?? existing?.codePreview ?? null,
+        commitUrl: parseString(update.commitUrl) ?? existing?.commitUrl ?? null,
+        elapsedMs: parseNumber(update.elapsedMs) ?? existing?.elapsedMs ?? null,
+        error: parseString(update.error) ?? existing?.error ?? null,
+      };
+
+      return {
+        ...previous,
+        [iteration]: nextCard,
+      };
+    });
+  }, []);
+
+  const handleLoopEvent = useCallback(
+    (eventName: LoopEventName, messageEvent: MessageEvent<string>) => {
+      if (messageEvent.lastEventId) {
+        const id = Number(messageEvent.lastEventId);
+        if (Number.isInteger(id)) {
+          if (processedEventIdsRef.current.has(id)) {
+            return;
+          }
+          processedEventIdsRef.current.add(id);
+        }
+      }
+
+      const eventData = parseEventData(messageEvent.data);
+      if (!eventData) {
+        return;
+      }
+
+      if (eventName === 'iteration-start') {
+        const iteration = parseNumber(eventData.iteration);
+        if (iteration === null) {
+          return;
+        }
+
+        upsertIterationCard(iteration, {
+          iteration,
+          state: 'running',
+          maxIterations: parseNumber(eventData.maxIterations),
+          elapsedMs: parseNumber(eventData.elapsedMs),
+          feedbackSnippet: `Iteration ${iteration} in progress...`,
+        });
+        return;
+      }
+
+      if (eventName === 'iteration-complete') {
+        const iteration = parseNumber(eventData.iteration);
+        if (iteration === null) {
+          return;
+        }
+
+        const score = parseNumber(eventData.score);
+        const delta = parseNumber(eventData.improvement);
+        const codePreview = parseString(eventData.codePreview);
+
+        upsertIterationCard(iteration, {
+          iteration,
+          state: 'complete',
+          maxIterations: parseNumber(eventData.maxIterations),
+          score,
+          previousScore: parseNumber(eventData.previousScore),
+          delta,
+          screenshotBase64: parseString(eventData.screenshotBase64),
+          diffImageBase64: parseString(eventData.diffImageBase64),
+          codePreview,
+          commitUrl: parseString(eventData.commitUrl),
+          elapsedMs: parseNumber(eventData.elapsedMs),
+          feedbackSnippet: deriveFeedbackSnippet(score, delta, codePreview),
+          error: null,
+        });
+        return;
+      }
+
+      if (eventName === 'loop-complete') {
+        setLoopStatus('complete');
+        setIsCloneRunning(false);
+        setConnectionStatus('disconnected');
+        setLoopSummary({
+          finalScore: parseNumber(eventData.finalScore),
+          bestIteration: parseNumber(eventData.bestIteration),
+        });
+        closeEventStream();
+        return;
+      }
+
+      if (eventName === 'loop-error') {
+        const message = parseString(eventData.error) ?? 'Loop failed unexpectedly.';
+        const iteration = parseNumber(eventData.iteration);
+
+        if (iteration !== null) {
+          upsertIterationCard(iteration, {
+            iteration,
+            state: 'error',
+            score: parseNumber(eventData.lastScore),
+            feedbackSnippet: message,
+            error: message,
+          });
+        }
+
+        setLoopStatus('error');
+        setLoopErrorMessage(message);
+        setIsCloneRunning(false);
+        setConnectionStatus('disconnected');
+        closeEventStream();
+      }
+    },
+    [closeEventStream, upsertIterationCard],
+  );
+
+  const connectToLoopEvents = useCallback(
+    (sessionId: string) => {
+      closeEventStream();
+      setConnectionStatus('connecting');
+
+      const eventSource = new EventSource(`${API_BASE_URL}/api/loop/${sessionId}/events`);
+      eventSourceRef.current = eventSource;
+
+      eventSource.onopen = () => {
+        setConnectionStatus('connected');
+      };
+
+      const attachHandler = (eventName: LoopEventName): ((event: Event) => void) => {
+        return (event: Event) => {
+          const messageEvent = event as MessageEvent<string>;
+          handleLoopEvent(eventName, messageEvent);
+        };
+      };
+
+      const iterationStartHandler = attachHandler('iteration-start');
+      const iterationCompleteHandler = attachHandler('iteration-complete');
+      const loopCompleteHandler = attachHandler('loop-complete');
+      const loopErrorHandler = attachHandler('loop-error');
+
+      eventSource.addEventListener('iteration-start', iterationStartHandler);
+      eventSource.addEventListener('iteration-complete', iterationCompleteHandler);
+      eventSource.addEventListener('loop-complete', loopCompleteHandler);
+      eventSource.addEventListener('loop-error', loopErrorHandler);
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        if (eventSourceRef.current === eventSource) {
+          eventSourceRef.current = null;
+        }
+
+        if (loopStatusRef.current !== 'running') {
+          return;
+        }
+
+        setConnectionStatus('reconnecting');
+
+        if (reconnectTimerRef.current !== null) {
+          return;
+        }
+
+        reconnectTimerRef.current = window.setTimeout(() => {
+          reconnectTimerRef.current = null;
+          if (loopStatusRef.current === 'running') {
+            connectToLoopEvents(sessionId);
+          }
+        }, SSE_RECONNECT_MS);
+      };
+    },
+    [closeEventStream, handleLoopEvent],
+  );
 
   const handleIncomingFiles = useCallback(
     (incomingFiles: File[]) => {
@@ -287,47 +710,109 @@ function App(): JSX.Element {
     [],
   );
 
+  const startCloneLoop = useCallback(async () => {
+    if (isCloneRunning) {
+      return;
+    }
+
+    const nextErrors = validateCloneConfig(cloneConfig);
+    const hasErrors = Object.values(nextErrors).some((error) => typeof error === 'string');
+
+    if (hasErrors) {
+      setCloneConfigErrors(nextErrors);
+      return;
+    }
+
+    if (files.length === 0) {
+      addToast('Upload at least one screenshot before starting.');
+      return;
+    }
+
+    closeEventStream();
+    processedEventIdsRef.current.clear();
+
+    setLoopStatus('running');
+    setConnectionStatus('connecting');
+    setLoopErrorMessage(null);
+    setLoopSummary(null);
+    setIterationCards({});
+    setExpandedIteration(null);
+    setIsCloneRunning(true);
+
+    window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(cloneConfig));
+    setCloneConfigErrors({});
+
+    try {
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append('screenshots', file);
+      }
+
+      const uploadResponse = await fetch(`${API_BASE_URL}/api/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error(await parseApiError(uploadResponse, 'Upload failed.'));
+      }
+
+      const uploadResult = (await uploadResponse.json()) as UploadResponse;
+
+      const loopRequest: LoopStartRequest = {
+        sessionId: uploadResult.sessionId,
+        config: {
+          projectName: cloneConfig.projectName.trim(),
+          maxIterations: Number(cloneConfig.maxIterations),
+          targetScore: Number(cloneConfig.targetSimilarity),
+          githubUrl: cloneConfig.githubRepoUrl.trim() || undefined,
+          githubToken: cloneConfig.githubToken.trim() || undefined,
+        },
+      };
+
+      const startResponse = await fetch(`${API_BASE_URL}/api/loop/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(loopRequest),
+      });
+
+      if (!startResponse.ok) {
+        throw new Error(await parseApiError(startResponse, 'Failed to start loop.'));
+      }
+
+      const startPayload = (await startResponse.json()) as LoopStartResponse;
+      setLoopSessionId(startPayload.sessionId);
+      connectToLoopEvents(startPayload.sessionId);
+      addToast('Clone session started.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to start clone loop.';
+      setLoopStatus('error');
+      setConnectionStatus('disconnected');
+      setLoopErrorMessage(message);
+      setIsCloneRunning(false);
+      addToast(message);
+    }
+  }, [
+    addToast,
+    cloneConfig,
+    closeEventStream,
+    connectToLoopEvents,
+    files,
+    isCloneRunning,
+    validateCloneConfig,
+  ]);
+
   const handleStartClone = useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (isCloneRunning) {
-        return;
-      }
-
-      const nextErrors = validateCloneConfig(cloneConfig);
-      const hasErrors = Object.values(nextErrors).some((error) => typeof error === 'string');
-
-      if (hasErrors) {
-        setCloneConfigErrors(nextErrors);
-        return;
-      }
-
-      if (files.length === 0) {
-        addToast('Upload at least one screenshot before starting.');
-        return;
-      }
-
-      window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(cloneConfig));
-      setCloneConfigErrors({});
-      setIsCloneRunning(true);
-      addToast('Clone session started.');
+      void startCloneLoop();
     },
-    [addToast, cloneConfig, files.length, isCloneRunning, validateCloneConfig],
+    [startCloneLoop],
   );
 
   const canStartClone = cloneConfig.projectName.trim().length > 0 && files.length > 0 && !isCloneRunning;
-
-  const uploadFormData = useMemo(() => {
-    const formData = new FormData();
-
-    for (const file of files) {
-      formData.append('screenshots', file);
-    }
-
-    return formData;
-  }, [files]);
-
-  const uploadCount = uploadFormData.getAll('screenshots').length;
   const dropZoneDisabled = files.length >= MAX_FILES;
 
   return (
@@ -387,7 +872,7 @@ function App(): JSX.Element {
             <p>
               {files.length}/{MAX_FILES} uploaded
             </p>
-            <p>{uploadCount > 0 ? `FormData ready: ${uploadCount} file(s)` : 'No files staged yet'}</p>
+            <p>{files.length > 0 ? `${files.length} file(s) staged` : 'No files staged yet'}</p>
           </div>
 
           <div className="mt-6 grid grid-cols-5 gap-3">
@@ -526,6 +1011,165 @@ function App(): JSX.Element {
               ) : null}
             </form>
           </section>
+        </section>
+
+        <section className="mx-auto mt-8 w-full max-w-4xl rounded-2xl border border-slate-700 bg-card/70 p-5 shadow-lg shadow-black/20">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-2xl font-semibold text-slate-100">Iteration Timeline</h2>
+            <p className="text-sm text-slate-400">
+              {loopSessionId ? `Session ${loopSessionId}` : 'No active session'}{' '}
+              {loopStatus === 'running' ? `(${connectionStatus})` : ''}
+            </p>
+          </div>
+
+          {loopStatus === 'complete' && loopSummary ? (
+            <div className="success-banner relative mb-4 overflow-hidden rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-emerald-200">
+              <div className="absolute inset-0 pointer-events-none">
+                <span className="confetti-dot confetti-dot-a" />
+                <span className="confetti-dot confetti-dot-b" />
+                <span className="confetti-dot confetti-dot-c" />
+                <span className="confetti-dot confetti-dot-d" />
+              </div>
+              <p className="relative text-sm font-semibold">
+                Loop complete. Final score {loopSummary.finalScore !== null ? loopSummary.finalScore.toFixed(2) : 'n/a'}
+                {loopSummary.bestIteration !== null ? `, best at iteration ${loopSummary.bestIteration}` : ''}.
+              </p>
+            </div>
+          ) : null}
+
+          {loopStatus === 'error' ? (
+            <div className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
+              <p className="text-sm text-red-200">Loop failed: {loopErrorMessage ?? 'Unknown error'}</p>
+              <button
+                type="button"
+                className="mt-3 rounded-md bg-red-500/30 px-3 py-1.5 text-sm font-semibold text-red-100 transition hover:bg-red-500/45 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isCloneRunning}
+                onClick={() => {
+                  void startCloneLoop();
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
+
+          <div
+            ref={scrollContainerRef}
+            className="max-h-[34rem] overflow-y-auto rounded-xl border border-slate-800 bg-surface/60 p-4"
+          >
+            <div ref={newestAnchorRef} />
+
+            {orderedIterations.length === 0 ? (
+              <div className="flex min-h-44 flex-col items-center justify-center gap-3 text-slate-300">
+                <span className="loading-spinner" aria-hidden="true" />
+                <p className="text-sm">Waiting for first iteration update...</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {orderedIterations.map((card) => {
+                  const isExpanded = expandedIteration === card.iteration;
+                  const thumbSrc = toDataUrl(card.screenshotBase64);
+                  const diffSrc = toDataUrl(card.diffImageBase64);
+                  const scoreClass = getScoreColorClass(card.score);
+                  const isActive = card.state === 'running' && loopStatus === 'running';
+
+                  return (
+                    <article
+                      key={card.iteration}
+                      className={`timeline-card-enter rounded-xl border bg-card/80 transition ${
+                        isActive
+                          ? 'running-card border-indigo-400/60 shadow-[0_0_0_1px_rgba(99,102,241,0.6)]'
+                          : card.state === 'error'
+                            ? 'border-red-500/40'
+                            : 'border-slate-700'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedIteration((previous) => (previous === card.iteration ? null : card.iteration))}
+                        className="flex w-full items-start gap-3 p-3 text-left"
+                      >
+                        <div className="mt-1 h-4 w-4 rounded-full border border-indigo-300/60 bg-indigo-400/70" />
+                        <div className="w-[120px] shrink-0 overflow-hidden rounded-md border border-slate-700 bg-slate-900/70">
+                          {thumbSrc ? (
+                            <img src={thumbSrc} alt={`Iteration ${card.iteration} thumbnail`} className="h-[80px] w-[120px] object-cover" />
+                          ) : (
+                            <div className="grid h-[80px] w-[120px] place-items-center text-xs text-slate-500">No image</div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <p className="text-2xl font-bold leading-none text-slate-100">
+                              #{card.iteration}
+                            </p>
+                            <p className="text-sm font-semibold text-slate-300">
+                              {card.maxIterations !== null ? `of ${card.maxIterations}` : 'in progress'}
+                            </p>
+                            <p className={`text-sm font-semibold ${scoreClass}`}>
+                              Score: {card.score !== null ? card.score.toFixed(2) : 'n/a'}
+                            </p>
+                            <p className="text-sm text-slate-300">Delta: {formatDelta(card.delta)}</p>
+                          </div>
+                          <p className="mt-1 truncate text-sm text-slate-300">{card.feedbackSnippet}</p>
+                        </div>
+                      </button>
+
+                      {isExpanded ? (
+                        <div className="space-y-4 border-t border-slate-700/80 px-4 pb-4 pt-3">
+                          {thumbSrc ? (
+                            <div>
+                              <p className="mb-2 text-xs uppercase tracking-wide text-slate-400">Screenshot</p>
+                              <img
+                                src={thumbSrc}
+                                alt={`Iteration ${card.iteration} full screenshot`}
+                                className="w-full rounded-lg border border-slate-700 bg-slate-900 object-contain"
+                              />
+                            </div>
+                          ) : null}
+
+                          {thumbSrc && diffSrc ? (
+                            <div>
+                              <p className="mb-2 text-xs uppercase tracking-wide text-slate-400">Diff Overlay</p>
+                              <div className="relative overflow-hidden rounded-lg border border-slate-700 bg-slate-900">
+                                <img src={thumbSrc} alt="Base screenshot" className="w-full object-contain" />
+                                <img
+                                  src={diffSrc}
+                                  alt="Diff overlay"
+                                  className="absolute inset-0 h-full w-full object-contain opacity-65 mix-blend-screen"
+                                />
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {card.codePreview ? (
+                            <div>
+                              <p className="mb-2 text-xs uppercase tracking-wide text-slate-400">Code Preview</p>
+                              <pre className="max-h-80 overflow-auto rounded-lg border border-slate-700 bg-slate-900/80 p-3 text-xs leading-relaxed text-emerald-200">
+                                <code>{card.codePreview}</code>
+                              </pre>
+                            </div>
+                          ) : null}
+
+                          {card.commitUrl ? (
+                            <p className="text-sm">
+                              <a
+                                href={card.commitUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-indigo-300 underline transition hover:text-indigo-200"
+                              >
+                                View commit
+                              </a>
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </section>
       </div>
 

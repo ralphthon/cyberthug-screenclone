@@ -14,6 +14,7 @@
 - When API endpoints accept large JSON payloads, set an explicit `express.json({ limit })` and map `entity.too.large` errors to stable API codes instead of falling through to generic 500 responses.
 - For visual compare endpoints, normalize both original/generated images to the same PNG dimensions before running vision and pixel diff so both scoring signals evaluate identical geometry.
 - For SSE-backed loop sessions, keep a bounded per-session event buffer and replay it on connect so reconnecting clients recover missed timeline events.
+- For SSE-driven timelines, dedupe replayed events by SSE `lastEventId` and combine with a 3s reconnect backoff so UI cards do not duplicate across disconnect/reconnect cycles.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -273,4 +274,22 @@
 - **Learnings for future iterations:**
   - Keep loop orchestration memory (`bestScore`, `bestIteration`, `previousScore`) in the API layer even when process lifecycle lives in a manager class, so SSE/status routes can remain deterministic across reconnects.
   - When restarting a loop for an existing session ID, create the new session record before spawning and delete it on spawn failure to avoid stale status/SSE records.
+---
+## 2026-02-28 15:00:13 UTC - US-010
+- Implemented the live iteration timeline UI in the frontend with SSE-backed real-time updates, newest-first vertical cards, and upload->loop-start integration (`/api/upload` then `/api/loop/start`).
+- Added timeline card behaviors required by the story: 120x80 thumbnail, large bold iteration number, score + exact color thresholds (`text-red-400`, `text-yellow-400`, `text-green-400`), delta display, one-line feedback snippet, running-card pulse, and slide-in card animation.
+- Added expandable card details with full screenshot, diff overlay view, code preview block, and commit link rendering when available.
+- Added completion/error UX states: confetti-style success banner on complete, error banner with retry action on loop-error, and empty-state spinner (`Waiting for first iteration update...`).
+- Added reconnect-safe SSE client behavior with 3-second retry and `lastEventId` dedupe, plus intersection-observer auto-scroll behavior that only snaps to newest when the user remains at the newest anchor.
+- Files changed: `src/client/src/App.tsx`, `src/client/src/index.css`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implementation intent/structure against provided references (`designs/mockups/us010.png`, `designs/mockup-v3.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this iteration as **pass** for required US-010 interactions/components; automated browser screenshot diffing is not configured in this harness, so final pixel-perfect verification remains manual.
+- **Learnings for future iterations:**
+  - Timeline cards should be keyed by iteration number and merged via upsert to handle `iteration-start` then `iteration-complete` event sequences without duplicate entries.
+  - Keep loop event parsing defensive (`number|string` coercion) because SSE payload fields can vary by source and reconnection replay.
+  - Separate loop runtime status (`running|complete|error`) from transport status (`connected|reconnecting`) to keep UI state transitions clear during SSE interruptions.
 ---
