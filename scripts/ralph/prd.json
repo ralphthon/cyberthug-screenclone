@@ -19,8 +19,9 @@
         "CORS configured on Express to allow localhost:5173"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "Use concurrently for dev:all script. TailwindCSS config: darkMode 'class', custom colors: primary #6366f1, surface #1e1b2e, card #2a2740."
+      "passes": false,
+      "notes": "Use concurrently for dev:all script. TailwindCSS config: darkMode 'class', custom colors: primary #6366f1, surface #1e1b2e, card #2a2740.",
+      "status": "pending"
     },
     {
       "id": "US-002",
@@ -41,8 +42,9 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Use react-dropzone or native drag events. Object URLs for previews \u2014 revoke on remove/unmount to prevent memory leaks."
+      "passes": false,
+      "notes": "Use react-dropzone or native drag events. Object URLs for previews \u2014 revoke on remove/unmount to prevent memory leaks.",
+      "status": "pending"
     },
     {
       "id": "US-003",
@@ -61,8 +63,9 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Use react-hook-form or simple controlled components. localStorage key: 'ralphton-config'."
+      "passes": false,
+      "notes": "Use react-hook-form or simple controlled components. localStorage key: 'ralphton-config'.",
+      "status": "pending"
     },
     {
       "id": "US-004",
@@ -83,8 +86,9 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Use multer with diskStorage. uuid package for session IDs. Cleanup interval: check /tmp/ralphton-* directories older than 24h."
+      "passes": false,
+      "notes": "Use multer with diskStorage. uuid package for session IDs. Cleanup interval: check /tmp/ralphton-* directories older than 24h.",
+      "status": "pending"
     },
     {
       "id": "US-005",
@@ -103,8 +107,9 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "Vision prompt should extract: DOM structure estimate, CSS grid/flex layout, exact hex colors, font families, component types (nav, hero, card, footer, etc)."
+      "passes": false,
+      "notes": "Vision prompt should extract: DOM structure estimate, CSS grid/flex layout, exact hex colors, font families, component types (nav, hero, card, footer, etc).",
+      "status": "pending"
     },
     {
       "id": "US-006",
@@ -127,8 +132,9 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "ralph.sh lives at scripts/ralph/ralph.sh. prd.json template generated per-session with single story: 'Clone the uploaded screenshot'. child_process.spawn with {stdio: 'pipe', cwd: sessionDir}. Kill child on session abort."
+      "passes": false,
+      "notes": "ralph.sh lives at scripts/ralph/ralph.sh. prd.json template generated per-session with single story: 'Clone the uploaded screenshot'. child_process.spawn with {stdio: 'pipe', cwd: sessionDir}. Kill child on session abort.",
+      "status": "pending"
     },
     {
       "id": "US-007",
@@ -149,7 +155,8 @@
       ],
       "priority": 7,
       "passes": false,
-      "notes": "Use puppeteer-core + system Chromium or puppeteer with bundled Chromium. Singleton browser pattern: let browser = null; async function getBrowser() { if (!browser) browser = await puppeteer.launch(...); return browser; }"
+      "notes": "Use puppeteer-core + system Chromium or puppeteer with bundled Chromium. Singleton browser pattern: let browser = null; async function getBrowser() { if (!browser) browser = await puppeteer.launch(...); return browser; }",
+      "status": "pending"
     },
     {
       "id": "US-008",
@@ -176,7 +183,8 @@
       ],
       "priority": 8,
       "passes": false,
-      "notes": "This is the key innovation: ralph doesn't just know the score, it knows WHAT to fix and HOW. Vision prompt template: 'You are a senior frontend developer reviewing a website clone attempt. Image 1 is the ORIGINAL. Image 2 is the CLONE. Evaluate similarity as a web product (not pixels). Return JSON: {score, layout_match, color_match, component_match, text_match, responsive_match, differences[], suggestions[], verdict, reasoning}'. Use pixelmatch + pngjs for secondary diff image. sharp for resizing."
+      "notes": "This is the key innovation: ralph doesn't just know the score, it knows WHAT to fix and HOW. Vision prompt template: 'You are a senior frontend developer reviewing a website clone attempt. Image 1 is the ORIGINAL. Image 2 is the CLONE. Evaluate similarity as a web product (not pixels). Return JSON: {score, layout_match, color_match, component_match, text_match, responsive_match, differences[], suggestions[], verdict, reasoning}'. Use pixelmatch + pngjs for secondary diff image. sharp for resizing.",
+      "status": "pending"
     },
     {
       "id": "US-009",
@@ -200,7 +208,8 @@
       ],
       "priority": 9,
       "passes": false,
-      "notes": "SSE format: 'event: iteration-complete\\ndata: {json}\\n\\n'. Use EventEmitter from RalphProcessManager. res.write() for SSE, res.flush() if compression enabled. Set headers: Cache-Control no-cache, Connection keep-alive."
+      "notes": "SSE format: 'event: iteration-complete\\ndata: {json}\\n\\n'. Use EventEmitter from RalphProcessManager. res.write() for SSE, res.flush() if compression enabled. Set headers: Cache-Control no-cache, Connection keep-alive.",
+      "status": "pending"
     },
     {
       "id": "US-010",
@@ -222,7 +231,8 @@
       ],
       "priority": 10,
       "passes": false,
-      "notes": "Custom useEventSource hook wrapping EventSource API. Use framer-motion or CSS animations for card entrance. Intersection Observer for auto-scroll control."
+      "notes": "Custom useEventSource hook wrapping EventSource API. Use framer-motion or CSS animations for card entrance. Intersection Observer for auto-scroll control.",
+      "status": "pending"
     },
     {
       "id": "US-011",
@@ -245,7 +255,8 @@
       ],
       "priority": 11,
       "passes": false,
-      "notes": "Slider: use CSS clip-path: inset(0 {100-sliderPos}% 0 0) on overlay image. Synchronized zoom/pan via shared transform state."
+      "notes": "Slider: use CSS clip-path: inset(0 {100-sliderPos}% 0 0) on overlay image. Synchronized zoom/pan via shared transform state.",
+      "status": "pending"
     },
     {
       "id": "US-012",
@@ -266,7 +277,8 @@
       ],
       "priority": 12,
       "passes": false,
-      "notes": "Use recharts: LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine for target. CartesianGrid with strokeDasharray for subtle grid."
+      "notes": "Use recharts: LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine for target. CartesianGrid with strokeDasharray for subtle grid.",
+      "status": "pending"
     },
     {
       "id": "US-013",
@@ -287,7 +299,8 @@
       ],
       "priority": 13,
       "passes": false,
-      "notes": "Use @octokit/rest. createOrUpdateFileContents API for simplicity. Branch from default branch HEAD."
+      "notes": "Use @octokit/rest. createOrUpdateFileContents API for simplicity. Branch from default branch HEAD.",
+      "status": "pending"
     },
     {
       "id": "US-014",
@@ -308,7 +321,8 @@
       ],
       "priority": 14,
       "passes": false,
-      "notes": "Use archiver package for streaming ZIP creation. Pipe directly to response for memory efficiency."
+      "notes": "Use archiver package for streaming ZIP creation. Pipe directly to response for memory efficiency.",
+      "status": "pending"
     },
     {
       "id": "US-015",
@@ -339,7 +353,8 @@
       ],
       "priority": 15,
       "passes": false,
-      "notes": "OLV settings map to conf.yaml fields: openai_compatible_llm.base_url, openai_compatible_llm.llm_api_key, openai_compatible_llm.model, qwen3_tts.voice. Settings saved to localStorage key: \"ralphton-olv-config\". On save, optionally POST to OLV /api/config to hot-reload without restart. Connection test: WebSocket open + close within 3s = success."
+      "notes": "OLV settings map to conf.yaml fields: openai_compatible_llm.base_url, openai_compatible_llm.llm_api_key, openai_compatible_llm.model, qwen3_tts.voice. Settings saved to localStorage key: \"ralphton-olv-config\". On save, optionally POST to OLV /api/config to hot-reload without restart. Connection test: WebSocket open + close within 3s = success.",
+      "status": "pending"
     },
     {
       "id": "US-016",
@@ -361,7 +376,8 @@
       ],
       "priority": 16,
       "passes": false,
-      "notes": "Bridge is a React context provider that wraps both OpenWaifu WebSocket and ScreenClone SSE. Intent detection can be simple keyword matching (no NLP needed \u2014 Cloney's LLM handles ambiguity)."
+      "notes": "Bridge is a React context provider that wraps both OpenWaifu WebSocket and ScreenClone SSE. Intent detection can be simple keyword matching (no NLP needed \u2014 Cloney's LLM handles ambiguity).",
+      "status": "pending"
     },
     {
       "id": "US-017",
@@ -381,7 +397,8 @@
       ],
       "priority": 17,
       "passes": false,
-      "notes": "Key insight: ralph.sh manages its own iteration loop. Our backend wraps it with: (1) prd.json generation, (2) render+compare after each iteration, (3) SSE event emission. The feedback loop is: ralph generates code \u2192 we render+screenshot \u2192 we compare \u2192 we update progress.txt with score \u2192 ralph reads score on next iteration."
+      "notes": "Key insight: ralph.sh manages its own iteration loop. Our backend wraps it with: (1) prd.json generation, (2) render+compare after each iteration, (3) SSE event emission. The feedback loop is: ralph generates code \u2192 we render+screenshot \u2192 we compare \u2192 we update progress.txt with score \u2192 ralph reads score on next iteration.",
+      "status": "pending"
     },
     {
       "id": "US-018",
@@ -402,7 +419,8 @@
       ],
       "priority": 18,
       "passes": false,
-      "notes": "OpenWaifu emotion tags: [joy], [sadness], [surprise], [fear], [anger], [disgust], [smirk], [neutral]. WaifuClaw emotionMap for expression indices. Qwen3 TTS Sohee voice with per-emotion pitch/speed/breathing from qwen3_tts.py config."
+      "notes": "OpenWaifu emotion tags: [joy], [sadness], [surprise], [fear], [anger], [disgust], [smirk], [neutral]. WaifuClaw emotionMap for expression indices. Qwen3 TTS Sohee voice with per-emotion pitch/speed/breathing from qwen3_tts.py config.",
+      "status": "pending"
     },
     {
       "id": "US-019",
@@ -426,7 +444,8 @@
       ],
       "priority": 19,
       "passes": false,
-      "notes": "Use CSS custom properties for theme colors. Prevent FOUC: inject theme class in <script> block in index.html before React hydrates. TailwindCSS dark: variant for all components."
+      "notes": "Use CSS custom properties for theme colors. Prevent FOUC: inject theme class in <script> block in index.html before React hydrates. TailwindCSS dark: variant for all components.",
+      "status": "pending"
     },
     {
       "id": "US-020",
@@ -447,7 +466,8 @@
         "Typecheck passes"
       ],
       "passes": false,
-      "notes": "ralph-image-analysis is ALREADY included at deps/ralph-image-analysis/ (no need to clone). setup.sh just needs to verify it exists, install its npm deps if any, and check omx CLI availability."
+      "notes": "ralph-image-analysis is ALREADY included at deps/ralph-image-analysis/ (no need to clone). setup.sh just needs to verify it exists, install its npm deps if any, and check omx CLI availability.",
+      "status": "pending"
     },
     {
       "id": "US-021",
@@ -471,7 +491,8 @@
         "Typecheck passes"
       ],
       "passes": false,
-      "notes": "OpenWaifu is ALREADY included at deps/OpenWaifu/ (no need to clone). setup.sh just needs to verify it exists, check install.sh is executable, and document DASHSCOPE_API_KEY. Open-LLM-VTuber still needs to be cloned separately if not present."
+      "notes": "OpenWaifu is ALREADY included at deps/OpenWaifu/ (no need to clone). setup.sh just needs to verify it exists, check install.sh is executable, and document DASHSCOPE_API_KEY. Open-LLM-VTuber still needs to be cloned separately if not present.",
+      "status": "pending"
     }
   ]
 }
