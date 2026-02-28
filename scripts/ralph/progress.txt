@@ -1,6 +1,7 @@
 ## Codebase Patterns
 - Use ESLint v9 flat config in `eslint.config.js`; `.eslintrc.*` is ignored.
 - Keep client and server TypeScript configs separate (`src/client/tsconfig.json` and `src/server/tsconfig.json`) and validate both in `npm run typecheck`.
+- For numeric settings inputs, keep React state as strings for controlled fields and validate/coerce at submit time before persistence.
 
 ## 2026-02-28 07:26:01 UTC - US-001
 - Implemented initial ScreenClone scaffold with Vite + React + TypeScript + Tailwind frontend, Express backend, shared types, and root tooling/scripts.
@@ -16,4 +17,20 @@
   - ESLint v9 in this repo requires flat config (`eslint.config.js`).
   - Port expectations are fixed by US-001: frontend `5173`, backend `3001`.
   - `timeout 20s` startup probes are a fast way to verify long-running dev scripts without hanging the iteration.
+---
+
+## 2026-02-28 07:42:23 UTC - US-003
+- Implemented the clone session settings form under the upload UI: project name, GitHub URL, GitHub token with show/hide toggle, max iterations, and target similarity.
+- Added inline validation messages (required project name, URL format, iteration minimum, similarity range), disabled start conditions (requires project name + at least one uploaded image), and clone-running disabled form opacity state.
+- Wired localStorage persistence for clone settings on submit and hydration on mount using key `ralphton-config`.
+- Files changed: `src/client/src/App.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+- Image-analysis observation (UI story): Browser automation is not configured in this harness, so comparison against `/designs/mockups/us003.png` could not be executed; manual visual verification is required.
+- **Learnings for future iterations:**
+  - Keep clone settings persistence shape aligned with controlled input state (`string` values) to avoid uncontrolled/number parsing issues.
+  - Inline validation + toast errors can coexist: use inline for field-level issues and toast for workflow preconditions (e.g., missing uploads).
 ---
