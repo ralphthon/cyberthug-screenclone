@@ -381,7 +381,12 @@ Integrate OpenWaifu's WebSocket client into the React frontend. Right-side panel
 - [ ]   - Connection test button — pings OLV WebSocket, shows green/red status
 - [ ]   - Save Settings button — persists to localStorage
 - [ ]   - Settings auto-loaded from localStorage on mount
-- [ ] Live2D canvas renders WaifuClaw model via pixi-live2d-display or OpenWaifu's built-in renderer
+- [ ] Live2D rendering via **iframe** embedding OLV's frontend (NOT canvas placeholder, NOT pixi-live2d-display)
+- [ ]   - iframe src: `{OLV_SERVER_URL}` (default `http://localhost:12393`)
+- [ ]   - iframe fills the Live2D section of the panel (responsive height)
+- [ ]   - iframe communicates with parent via postMessage API for emotion/command sync
+- [ ]   - If OLV server unreachable: show "OLV server not connected" placeholder with retry button
+- [ ]   - **DO NOT** draw a placeholder face on canvas. Either render real Live2D via iframe or show connection error.
 - [ ] WebSocket connects using configured server URL from settings
 - [ ] Handles WebSocket message types: text-input (send), audio-play-start (receive), display_text (receive), set-expression (receive)
 - [ ] Chat history shows conversation bubbles: user (right, primary) and Cloney (left, card color)
