@@ -10,6 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import CloneyPanel from './components/CloneyPanel';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3001';
 
@@ -1344,7 +1345,7 @@ function App(): JSX.Element {
         ))}
       </div>
 
-      <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-8">
+      <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-8 xl:pr-[28rem]">
         <header className="mb-10 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-indigo-400 to-indigo-600 text-xs font-bold text-white">
@@ -2056,6 +2057,7 @@ function App(): JSX.Element {
           )}
         </section>
       </div>
+      <CloneyPanel />
 
       <input
         ref={fileInputRef}

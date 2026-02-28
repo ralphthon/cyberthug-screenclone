@@ -19,6 +19,7 @@
 - For threshold-colored score trends in Recharts, derive a single ordered score dataset from iteration state and split it into low/mid/high data keys so each segment can be rendered with distinct colors while keeping one tooltip source.
 - For GitHub auto-commit flows, serialize per-session commit work in a promise queue before calling `git.updateRef` so iteration/final commits do not race on the same branch head.
 - For binary export endpoints, serve both `HEAD` and `GET` from the same archive builder so the frontend can show accurate size estimates before downloading.
+- For OLV/WebSocket settings UIs, keep editable form state separate from the applied connection config and only reconnect on explicit save; also wrap `new WebSocket(...)` in `try/catch` for malformed URL handling.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -368,4 +369,22 @@
 - **Learnings for future iterations:**
   - For downloadable session artifacts, generate ZIPs from the same canonical session sources used by loop state (`iterationHistory`, SSE event payload screenshots, and workspace generated files) to avoid export/view drift.
   - Supporting `HEAD` on download endpoints provides a clean way for frontend controls to show accurate size estimates before triggering binary downloads.
+---
+## 2026-02-28 16:33:46 UTC - US-015
+- Implemented the OpenWaifu/OLV right-side Cloney panel integration with four sections: collapsible OLV settings, Live2D canvas host, chat history bubbles, and message input/send controls.
+- Added persisted OLV settings (`ralphton-olv-config`) with auto-hydration on mount, save flow, server URL/model/API key/base URL/voice/persona controls, connection test flow, and optional config sync to OLV `/api/config`.
+- Added WebSocket client bridge using configured server URL with connection status indicator, required message handling (`display_text`, `audio-play-start`, `set-expression`), outbound `text-input` messages, and exponential reconnect backoff (`1s` to `30s`).
+- Added panel collapse persistence (`ralphton-olv-panel-collapsed`) and collapsed floating Cloney avatar (64x64) with unread badge behavior.
+- Aligned default WebSocket URL to `ws://localhost:12393/ws` and hardened connection-test URL handling with safe `WebSocket` constructor error fallback.
+- Files changed: `src/client/src/App.tsx`, `src/client/src/components/CloneyPanel.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implemented panel structure/interactions against supplied references (`designs/mockups/us015.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this iteration as **pass** for required US-015 feature coverage and layout intent; automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - For configurable realtime bridges, use a local draft config and a separately applied config to avoid reconnect storms while users type.
+  - WebSocket connection-test handlers should catch constructor errors explicitly because malformed URLs throw before async event callbacks.
 ---
