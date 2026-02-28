@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 const MAX_FILES = 5;
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const ACCEPTED_FILE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const CONFIG_STORAGE_KEY = 'ralphton-config';
 
 type Toast = {
   id: number;
@@ -14,12 +15,57 @@ type PreviewItem = {
   url: string;
 };
 
+type CloneConfig = {
+  projectName: string;
+  githubRepoUrl: string;
+  githubToken: string;
+  maxIterations: string;
+  targetSimilarity: string;
+};
+
+type CloneConfigField = keyof CloneConfig;
+
+type CloneConfigErrors = Partial<Record<CloneConfigField, string>>;
+
+const DEFAULT_CLONE_CONFIG: CloneConfig = {
+  projectName: '',
+  githubRepoUrl: '',
+  githubToken: '',
+  maxIterations: '1000',
+  targetSimilarity: '90',
+};
+
+function coerceStoredConfig(value: unknown): CloneConfig | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Partial<Record<CloneConfigField, unknown>>;
+
+  const toStringValue = (field: CloneConfigField): string => {
+    const fieldValue = candidate[field];
+    return typeof fieldValue === 'string' ? fieldValue : DEFAULT_CLONE_CONFIG[field];
+  };
+
+  return {
+    projectName: toStringValue('projectName'),
+    githubRepoUrl: toStringValue('githubRepoUrl'),
+    githubToken: toStringValue('githubToken'),
+    maxIterations: toStringValue('maxIterations'),
+    targetSimilarity: toStringValue('targetSimilarity'),
+  };
+}
+
 function App(): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toastTimersRef = useRef<number[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [cloneConfig, setCloneConfig] = useState<CloneConfig>(DEFAULT_CLONE_CONFIG);
+  const [cloneConfigErrors, setCloneConfigErrors] = useState<CloneConfigErrors>({});
+  const [showGithubToken, setShowGithubToken] = useState(false);
+  const [isCloneRunning, setIsCloneRunning] = useState(false);
 
   const previews = useMemo<PreviewItem[]>(
     () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -40,6 +86,24 @@ function App(): JSX.Element {
         window.clearTimeout(timerId);
       }
     };
+  }, []);
+
+  useEffect(() => {
+    const savedConfig = window.localStorage.getItem(CONFIG_STORAGE_KEY);
+    if (!savedConfig) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(savedConfig) as unknown;
+      const nextConfig = coerceStoredConfig(parsed);
+
+      if (nextConfig) {
+        setCloneConfig(nextConfig);
+      }
+    } catch {
+      window.localStorage.removeItem(CONFIG_STORAGE_KEY);
+    }
   }, []);
 
   const addToast = useCallback((message: string) => {
@@ -183,6 +247,76 @@ function App(): JSX.Element {
     setFiles((previous) => previous.filter((_, fileIndex) => fileIndex !== index));
   }, []);
 
+  const validateCloneConfig = useCallback((config: CloneConfig): CloneConfigErrors => {
+    const nextErrors: CloneConfigErrors = {};
+
+    if (config.projectName.trim().length === 0) {
+      nextErrors.projectName = 'Project name is required.';
+    }
+
+    const trimmedRepoUrl = config.githubRepoUrl.trim();
+    if (trimmedRepoUrl.length > 0) {
+      try {
+        const parsedUrl = new URL(trimmedRepoUrl);
+        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+          nextErrors.githubRepoUrl = 'GitHub repo URL must start with http:// or https://.';
+        }
+      } catch {
+        nextErrors.githubRepoUrl = 'Enter a valid GitHub repo URL.';
+      }
+    }
+
+    const maxIterations = Number(config.maxIterations);
+    if (!Number.isInteger(maxIterations) || maxIterations < 1) {
+      nextErrors.maxIterations = 'Max iterations must be an integer of at least 1.';
+    }
+
+    const targetSimilarity = Number(config.targetSimilarity);
+    if (!Number.isFinite(targetSimilarity) || targetSimilarity < 50 || targetSimilarity > 100) {
+      nextErrors.targetSimilarity = 'Target similarity must be between 50 and 100.';
+    }
+
+    return nextErrors;
+  }, []);
+
+  const handleConfigValueChange = useCallback(
+    (field: CloneConfigField, value: string) => {
+      setCloneConfig((previous) => ({ ...previous, [field]: value }));
+      setCloneConfigErrors((previous) => ({ ...previous, [field]: undefined }));
+    },
+    [],
+  );
+
+  const handleStartClone = useCallback(
+    (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (isCloneRunning) {
+        return;
+      }
+
+      const nextErrors = validateCloneConfig(cloneConfig);
+      const hasErrors = Object.values(nextErrors).some((error) => typeof error === 'string');
+
+      if (hasErrors) {
+        setCloneConfigErrors(nextErrors);
+        return;
+      }
+
+      if (files.length === 0) {
+        addToast('Upload at least one screenshot before starting.');
+        return;
+      }
+
+      window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(cloneConfig));
+      setCloneConfigErrors({});
+      setIsCloneRunning(true);
+      addToast('Clone session started.');
+    },
+    [addToast, cloneConfig, files.length, isCloneRunning, validateCloneConfig],
+  );
+
+  const canStartClone = cloneConfig.projectName.trim().length > 0 && files.length > 0 && !isCloneRunning;
+
   const uploadFormData = useMemo(() => {
     const formData = new FormData();
 
@@ -289,6 +423,109 @@ function App(): JSX.Element {
               );
             })}
           </div>
+
+          <section className="mt-8 rounded-2xl border border-slate-700 bg-card/70 p-5 shadow-lg shadow-black/20">
+            <h2 className="text-3xl font-semibold text-slate-100">Clone Settings</h2>
+            <form className="mt-4 space-y-4" onSubmit={handleStartClone}>
+              <fieldset disabled={isCloneRunning} className={isCloneRunning ? 'opacity-60' : ''}>
+                <div className="space-y-4">
+                  <label className="block">
+                    <span className="block text-sm font-medium text-slate-200">Project Name *</span>
+                    <input
+                      type="text"
+                      value={cloneConfig.projectName}
+                      onChange={(event) => handleConfigValueChange('projectName', event.target.value)}
+                      placeholder="my-landing-page"
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-surface/90 px-3 py-2 text-base text-slate-100 outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                    />
+                    {cloneConfigErrors.projectName ? (
+                      <span className="mt-1 block text-sm text-red-400">{cloneConfigErrors.projectName}</span>
+                    ) : null}
+                  </label>
+
+                  <label className="block">
+                    <span className="block text-sm font-medium text-slate-200">GitHub Repo URL</span>
+                    <input
+                      type="text"
+                      value={cloneConfig.githubRepoUrl}
+                      onChange={(event) => handleConfigValueChange('githubRepoUrl', event.target.value)}
+                      placeholder="https://github.com/owner/repo"
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-surface/90 px-3 py-2 text-base text-slate-100 outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                    />
+                    {cloneConfigErrors.githubRepoUrl ? (
+                      <span className="mt-1 block text-sm text-red-400">{cloneConfigErrors.githubRepoUrl}</span>
+                    ) : null}
+                  </label>
+
+                  <label className="block">
+                    <span className="block text-sm font-medium text-slate-200">GitHub Token</span>
+                    <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-700 bg-surface/90 px-3 py-2 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
+                      <input
+                        type={showGithubToken ? 'text' : 'password'}
+                        value={cloneConfig.githubToken}
+                        onChange={(event) => handleConfigValueChange('githubToken', event.target.value)}
+                        placeholder="ghp_xxx..."
+                        className="w-full bg-transparent text-base text-slate-100 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowGithubToken((previous) => !previous)}
+                        className="rounded-md px-2 py-1 text-sm text-indigo-300 transition hover:bg-primary/20 hover:text-indigo-200"
+                        aria-label={showGithubToken ? 'Hide GitHub token' : 'Show GitHub token'}
+                      >
+                        {showGithubToken ? '🙈' : '👁️'}
+                      </button>
+                    </div>
+                  </label>
+
+                  <label className="block">
+                    <span className="block text-sm font-medium text-slate-200">Max Iterations</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={cloneConfig.maxIterations}
+                      onChange={(event) => handleConfigValueChange('maxIterations', event.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-surface/90 px-3 py-2 text-base text-slate-100 outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                    />
+                    {cloneConfigErrors.maxIterations ? (
+                      <span className="mt-1 block text-sm text-red-400">{cloneConfigErrors.maxIterations}</span>
+                    ) : null}
+                  </label>
+
+                  <label className="block">
+                    <span className="block text-sm font-medium text-slate-200">Target Similarity</span>
+                    <input
+                      type="number"
+                      min={50}
+                      max={100}
+                      value={cloneConfig.targetSimilarity}
+                      onChange={(event) => handleConfigValueChange('targetSimilarity', event.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-surface/90 px-3 py-2 text-base text-slate-100 outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                    />
+                    {cloneConfigErrors.targetSimilarity ? (
+                      <span className="mt-1 block text-sm text-red-400">
+                        {cloneConfigErrors.targetSimilarity}
+                      </span>
+                    ) : null}
+                  </label>
+                </div>
+              </fieldset>
+
+              <button
+                type="submit"
+                disabled={!canStartClone}
+                className="w-full rounded-lg bg-primary px-5 py-2.5 text-lg font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-600/70 disabled:text-slate-300"
+              >
+                🚀 Start Cloning
+              </button>
+
+              {isCloneRunning ? (
+                <p className="text-center text-sm text-emerald-300">
+                  Clone is running. Form is locked until the current session completes.
+                </p>
+              ) : null}
+            </form>
+          </section>
         </section>
       </div>
 

@@ -5,6 +5,7 @@
 - For image previews, keep canonical upload state as `File[]` and always revoke `URL.createObjectURL(...)` values in cleanup.
 - For file picker flows, reset the hidden input value after handling `onChange` so re-selecting the same file still triggers an event.
 - For numeric settings inputs, keep React state as strings for controlled fields and validate/coerce at submit time before persistence.
+- For localStorage-backed forms, coerce parsed JSON through a typed sanitizer before hydrating state, and fall back to safe defaults for missing/invalid fields.
 - For server uploads, attach per-request session metadata to the Express request before Multer runs, and always clean up the session temp directory immediately on failed upload paths.
 - For long-running backend workers, isolate orchestration in a manager class (spawn + ring buffer + fs.watch progress parsing) and always wire server `SIGTERM`/`SIGINT` to graceful child-process shutdown.
 
@@ -126,4 +127,23 @@
 - **Learnings for future iterations:**
   - Keep upload pipeline state canonical as `File[]` and derive preview URLs and request `FormData` from that source-of-truth to avoid desynchronization.
   - For transient toast UX in React, keep timer IDs in refs and clear them on unmount to avoid stale state updates.
+---
+## 2026-02-28 13:22:22 UTC - US-003
+- Implemented the clone session settings form below the uploader with dark card styling and required fields: project name, GitHub repo URL, GitHub token, max iterations, and target similarity.
+- Added localStorage persistence and hydration using key `ralphton-config`, plus typed coercion for stored values to safely prefill controlled inputs.
+- Added inline validation messages for project name (required), GitHub URL format, max iterations (integer >= 1), and target similarity (50-100).
+- Added GitHub token show/hide toggle icon control, and wired start-button disable logic to require both project name and at least one uploaded image.
+- Added clone-running state that disables the full form via `<fieldset disabled>` and opacity reduction after submit.
+- Files changed: `src/client/src/App.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics` passed for `src/client/src/App.tsx` (0 errors)
+  - `mcp lsp_diagnostics_directory` passed for project root (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implementation goals against `/designs/mockups/us003.png` and supplied references; required structure and controls are implemented, but automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - For persisted form state, coerce parsed localStorage payloads through a typed sanitizer before hydrating controlled inputs to avoid invalid stored shapes breaking form rendering.
+  - Keep field-level errors in a keyed object and clear only the edited field on change for predictable inline validation UX.
 ---

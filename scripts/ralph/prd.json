@@ -63,9 +63,9 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Use react-hook-form or simple controlled components. localStorage key: 'ralphton-config'.",
-      "status": "pending"
+      "status": "passed"
     },
     {
       "id": "US-004",
