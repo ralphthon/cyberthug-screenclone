@@ -6,6 +6,15 @@ import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { CompareError, compareScreenshots } from './compareService.js';
 import {
+  buildSnapshotFiles,
+  commitFinalSnapshot,
+  commitImprovementSnapshot,
+  initializeGitHubCommitSession,
+  type GitHubCommitSession,
+  GitHubCommitError,
+  type ScoreHistoryEntry,
+} from './githubCommitService.js';
+import {
   RalphProcessManager,
   type RalphSessionState,
   type RalphSessionStatus,
@@ -37,6 +46,10 @@ type ApiErrorCode =
   | 'LOOP_NOT_FOUND'
   | 'LOOP_ALREADY_RUNNING'
   | 'LOOP_NOT_RUNNING'
+  | 'GITHUB_AUTH_FAILED'
+  | 'GITHUB_INVALID_REPO_URL'
+  | 'GITHUB_REPOSITORY_NOT_FOUND'
+  | 'GITHUB_API_ERROR'
   | 'LOOP_START_FAILED'
   | 'INTERNAL_ERROR';
 
@@ -91,6 +104,19 @@ type LoopEventEnvelope = {
   data: Record<string, unknown>;
 };
 
+type LoopIterationHistoryEntry = {
+  iteration: number;
+  score: number | null;
+  improvement: number | null;
+  commitUrl: string | null;
+};
+
+type LoopGitHubConfig = {
+  session: GitHubCommitSession;
+  scoreHistory: ScoreHistoryEntry[];
+  queue: Promise<void>;
+};
+
 type LoopSessionRecord = {
   sessionId: string;
   config: LoopStartConfig;
@@ -103,6 +129,8 @@ type LoopSessionRecord = {
   lastError: string | null;
   lastIterationScore: number | null;
   lastIterationEventKey: string | null;
+  iterationHistory: LoopIterationHistoryEntry[];
+  github: LoopGitHubConfig | null;
   events: LoopEventEnvelope[];
   subscribers: Set<Response>;
 };
@@ -375,8 +403,14 @@ const parseLoopStartRequest = (body: unknown): { sessionId: string; config: Loop
   const targetScore = parseLoopInteger(targetScoreValue, 'config.targetScore', 0, 100);
   const githubUrl = parseLoopString(configRaw.githubUrl, 'config.githubUrl', false);
   const githubToken = parseLoopString(configRaw.githubToken, 'config.githubToken', false);
+  const hasGitHubUrl = githubUrl.length > 0;
+  const hasGitHubToken = githubToken.length > 0;
 
-  if (githubUrl.length > 0) {
+  if (hasGitHubUrl !== hasGitHubToken) {
+    throw new ApiError('config.githubUrl and config.githubToken must both be provided', 'INVALID_REQUEST', 400);
+  }
+
+  if (hasGitHubUrl) {
     try {
       const parsedUrl = new URL(githubUrl);
       if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
@@ -403,21 +437,27 @@ const createLoopSessionRecord = (
   sessionId: string,
   config: LoopStartConfig,
   analysis: AnalysisResult | null,
-): LoopSessionRecord => ({
-  sessionId,
-  config,
-  analysis,
-  startedAtMs: Date.now(),
-  startedAtIso: new Date().toISOString(),
-  completedAtMs: null,
-  bestScore: null,
-  bestIteration: 0,
-  lastError: null,
-  lastIterationScore: null,
-  lastIterationEventKey: null,
-  events: [],
-  subscribers: new Set<Response>(),
-});
+  github: LoopGitHubConfig | null = null,
+  startedAtMs: number = Date.now(),
+): LoopSessionRecord => {
+  return {
+    sessionId,
+    config,
+    analysis,
+    startedAtMs,
+    startedAtIso: new Date(startedAtMs).toISOString(),
+    completedAtMs: null,
+    bestScore: null,
+    bestIteration: 0,
+    lastError: null,
+    lastIterationScore: null,
+    lastIterationEventKey: null,
+    iterationHistory: [],
+    github,
+    events: [],
+    subscribers: new Set<Response>(),
+  };
+};
 
 const writeSseEvent = (res: Response, envelope: LoopEventEnvelope): boolean => {
   try {
@@ -504,6 +544,111 @@ const getLoopImageArtifact = async (sessionId: string, candidateFilenames: strin
   }
 
   return null;
+};
+
+const enqueueGitHubTask = async <T>(session: LoopSessionRecord, task: () => Promise<T>): Promise<T> => {
+  if (!session.github) {
+    throw new Error('GitHub config is not enabled for this session');
+  }
+
+  const chainedTask = session.github.queue.then(task, task);
+  session.github.queue = chainedTask.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  return chainedTask;
+};
+
+const mapGitHubErrorToApiError = (error: GitHubCommitError): ApiError => {
+  if (error.code === 'INVALID_TOKEN') {
+    return new ApiError(error.message, 'GITHUB_AUTH_FAILED', 401);
+  }
+
+  if (error.code === 'INVALID_REPO') {
+    const apiCode = error.status === 404 ? 'GITHUB_REPOSITORY_NOT_FOUND' : 'GITHUB_INVALID_REPO_URL';
+    return new ApiError(error.message, apiCode, error.status);
+  }
+
+  return new ApiError(error.message, 'GITHUB_API_ERROR', error.status);
+};
+
+const commitImprovingIteration = async (
+  session: LoopSessionRecord,
+  iteration: number,
+  score: number,
+  deltaFromBest: number,
+): Promise<string | null> => {
+  const github = session.github;
+  if (!github) {
+    return null;
+  }
+
+  const scoreEntry: ScoreHistoryEntry = {
+    iteration,
+    score,
+    delta: Number(deltaFromBest.toFixed(2)),
+    commitUrl: null,
+    recordedAt: new Date().toISOString(),
+  };
+  github.scoreHistory.push(scoreEntry);
+
+  const commitUrl = await enqueueGitHubTask(session, async () => {
+    const snapshotFiles = await buildSnapshotFiles({
+      sessionId: session.sessionId,
+      projectName: session.config.projectName,
+      targetScore: session.config.targetScore,
+      branchName: github.session.branchName,
+      originalScreenshotReference: github.session.originalScreenshotReference,
+      scoreHistory: github.scoreHistory,
+    });
+
+    return commitImprovementSnapshot({
+      session: github.session,
+      iteration,
+      score,
+      delta: deltaFromBest,
+      files: snapshotFiles,
+    });
+  });
+
+  if (commitUrl.length > 0) {
+    scoreEntry.commitUrl = commitUrl;
+    return commitUrl;
+  }
+
+  return null;
+};
+
+const commitFinalSummary = async (
+  session: LoopSessionRecord,
+  iteration: number,
+  score: number,
+): Promise<string | null> => {
+  const github = session.github;
+  if (!github) {
+    return null;
+  }
+
+  return enqueueGitHubTask(session, async () => {
+    const snapshotFiles = await buildSnapshotFiles({
+      sessionId: session.sessionId,
+      projectName: session.config.projectName,
+      targetScore: session.config.targetScore,
+      branchName: github.session.branchName,
+      originalScreenshotReference: github.session.originalScreenshotReference,
+      scoreHistory: github.scoreHistory,
+    });
+
+    const commitUrl = await commitFinalSnapshot({
+      session: github.session,
+      iteration,
+      score,
+      files: snapshotFiles,
+    });
+
+    return commitUrl;
+  });
 };
 
 const buildLoopStatusResponse = (sessionId: string): Record<string, unknown> => {
@@ -598,6 +743,8 @@ ralphProcessManager.on('iteration-complete', (payload: ManagerIterationCompleteE
 
     const previousScore = session.lastIterationScore;
     const improvement = previousScore !== null && score !== null ? Number((score - previousScore).toFixed(2)) : null;
+    const previousBestScore = session.bestScore;
+    const isBestImprovement = score !== null && (previousBestScore === null || score > previousBestScore);
     session.lastIterationScore = score;
 
     if (score !== null && (session.bestScore === null || score > session.bestScore)) {
@@ -605,11 +752,32 @@ ralphProcessManager.on('iteration-complete', (payload: ManagerIterationCompleteE
       session.bestIteration = iteration;
     }
 
+    const iterationHistoryEntry: LoopIterationHistoryEntry = {
+      iteration,
+      score,
+      improvement,
+      commitUrl: null,
+    };
+    session.iterationHistory.push(iterationHistoryEntry);
+
+    let commitUrl: string | null = null;
+    if (score !== null && isBestImprovement && session.github) {
+      const deltaFromBest = previousBestScore === null ? score : score - previousBestScore;
+      try {
+        commitUrl = await commitImprovingIteration(session, iteration, score, deltaFromBest);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown GitHub commit failure';
+        console.warn(`[github] iteration commit failed for session ${payload.sessionId}: ${message}`);
+      }
+    }
+
     const [codePreview, screenshotBase64, diffImageBase64] = await Promise.all([
       getLoopCodePreview(payload.sessionId),
       getLoopImageArtifact(payload.sessionId, ['latest.png', 'generated.png', 'screenshot.png', 'clone.png']),
       getLoopImageArtifact(payload.sessionId, ['diff.png', 'pixel-diff.png', 'overlay.png']),
     ]);
+
+    iterationHistoryEntry.commitUrl = commitUrl;
 
     publishLoopEvent(payload.sessionId, 'iteration-complete', {
       iteration,
@@ -620,33 +788,65 @@ ralphProcessManager.on('iteration-complete', (payload: ManagerIterationCompleteE
       screenshotBase64,
       codePreview,
       diffImageBase64,
-      commitUrl: null,
+      commitUrl,
       elapsedMs: status?.elapsedMs ?? Date.now() - session.startedAtMs,
     });
   })();
 });
 
 ralphProcessManager.on('loop-complete', (payload: ManagerLoopCompleteEvent) => {
-  const session = loopSessions.get(payload.sessionId);
-  if (!session) {
-    return;
-  }
+  void (async () => {
+    const session = loopSessions.get(payload.sessionId);
+    if (!session) {
+      return;
+    }
 
-  const status = getRalphStatusOrNull(payload.sessionId);
-  const finalScore = payload.finalScore ?? status?.lastScore ?? session.lastIterationScore;
-  if (finalScore !== null && (session.bestScore === null || finalScore > session.bestScore)) {
-    session.bestScore = finalScore;
-    session.bestIteration = payload.totalIterations;
-  }
+    const status = getRalphStatusOrNull(payload.sessionId);
+    const finalScore = payload.finalScore ?? status?.lastScore ?? session.lastIterationScore;
+    if (finalScore !== null && (session.bestScore === null || finalScore > session.bestScore)) {
+      session.bestScore = finalScore;
+      session.bestIteration = payload.totalIterations;
+    }
 
-  session.completedAtMs = Date.now();
+    session.completedAtMs = Date.now();
 
-  publishLoopEvent(payload.sessionId, 'loop-complete', {
-    totalIterations: payload.totalIterations,
-    finalScore,
-    totalElapsedMs: status?.elapsedMs ?? session.completedAtMs - session.startedAtMs,
-    bestIteration: session.bestIteration,
-  });
+    publishLoopEvent(payload.sessionId, 'loop-complete', {
+      totalIterations: payload.totalIterations,
+      finalScore,
+      totalElapsedMs: status?.elapsedMs ?? session.completedAtMs - session.startedAtMs,
+      bestIteration: session.bestIteration,
+    });
+
+    if (session.github && finalScore !== null) {
+      const github = session.github;
+      const existingFinalEntry = github.scoreHistory.find(
+        (entry) => entry.iteration === payload.totalIterations && entry.score === finalScore,
+      );
+      const finalEntry =
+        existingFinalEntry ??
+        (() => {
+          const entry: ScoreHistoryEntry = {
+            iteration: payload.totalIterations,
+            score: finalScore,
+            delta: null,
+            commitUrl: null,
+            recordedAt: new Date().toISOString(),
+          };
+          github.scoreHistory.push(entry);
+          return entry;
+        })();
+
+      try {
+        const finalCommitUrl = await commitFinalSummary(session, payload.totalIterations, finalScore);
+        if (finalCommitUrl) {
+          finalEntry.commitUrl = finalCommitUrl;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown GitHub final commit failure';
+        console.warn(`[github] final commit failed for session ${payload.sessionId}: ${message}`);
+      }
+    }
+  })();
 });
 
 ralphProcessManager.on('loop-error', (payload: ManagerLoopErrorEvent) => {
@@ -771,13 +971,29 @@ app.post('/api/loop/start', async (req: Request, res: Response, next: NextFuncti
   try {
     const { sessionId, config } = parseLoopStartRequest(req.body);
     const existingStatus = getRalphStatusOrNull(sessionId);
+    const loopStartedAtMs = Date.now();
 
     if (existingStatus && isLoopStateActive(existingStatus.state)) {
       throw new ApiError(`Session '${sessionId}' is already running`, 'LOOP_ALREADY_RUNNING', 409);
     }
 
+    let github: LoopGitHubConfig | null = null;
+    if (config.githubUrl && config.githubToken) {
+      const githubSession = await initializeGitHubCommitSession({
+        projectName: config.projectName,
+        sessionId,
+        repoUrl: config.githubUrl,
+        token: config.githubToken,
+      });
+      github = {
+        session: githubSession,
+        scoreHistory: [],
+        queue: Promise.resolve(),
+      };
+    }
+
     const analysis = await analyzeSessionScreenshots({ sessionId });
-    const record = createLoopSessionRecord(sessionId, config, analysis);
+    const record = createLoopSessionRecord(sessionId, config, analysis, github, loopStartedAtMs);
     const previousRecord = loopSessions.get(sessionId);
     if (previousRecord) {
       for (const subscriber of previousRecord.subscribers) {
@@ -810,6 +1026,11 @@ app.post('/api/loop/start', async (req: Request, res: Response, next: NextFuncti
     if (error instanceof AnalysisError) {
       const responseDetails = error.retryable ? { retryable: true, retryAfterSeconds: 10 } : undefined;
       next(new ApiError(error.message, error.code as ApiErrorCode, error.status, responseDetails));
+      return;
+    }
+
+    if (error instanceof GitHubCommitError) {
+      next(mapGitHubErrorToApiError(error));
       return;
     }
 

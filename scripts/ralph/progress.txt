@@ -17,6 +17,7 @@
 - For SSE-driven timelines, dedupe replayed events by SSE `lastEventId` and combine with a 3s reconnect backoff so UI cards do not duplicate across disconnect/reconnect cycles.
 - For synchronized comparison panes, keep zoom/pan in one shared transform state and apply it across original/generated/diff canvases; set `touch-action: none` on the canvas to keep pointer drag interactions reliable.
 - For threshold-colored score trends in Recharts, derive a single ordered score dataset from iteration state and split it into low/mid/high data keys so each segment can be rendered with distinct colors while keeping one tooltip source.
+- For GitHub auto-commit flows, serialize per-session commit work in a promise queue before calling `git.updateRef` so iteration/final commits do not race on the same branch head.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -330,4 +331,21 @@
 - **Learnings for future iterations:**
   - Keep chart data derived from the existing iteration-card source of truth to avoid drift between timeline cards and chart values.
   - Use chart-level click toggles plus explicit control buttons so expand/collapse remains discoverable on both desktop and touch devices.
+---
+## 2026-02-28 15:58:25 UTC - US-013
+- Implemented GitHub auto-commit integration for improving loop iterations using Octokit Git Data APIs (`createTree` + `createCommit` + `updateRef`) with a dedicated backend service.
+- Added loop-start GitHub validation: when `githubUrl`/`githubToken` are provided, the backend now validates token auth (`GET /user`), validates repository access, initializes branch metadata (`ralph/clone-{projectName}-{timestamp}`), and returns API errors (`401` for invalid token) before the clone loop starts.
+- Wired iteration auto-commit behavior into SSE flow: only iterations that beat the previous best score trigger commit attempts, commit artifacts include `index.html`, `styles.css`, `script.js`, and generated `README.md` score history, and successful commit URLs now populate `iteration-complete` event `commitUrl`.
+- Added final summary commit behavior on loop completion using `[final]` commit message prefix, while keeping all GitHub failures non-blocking (warnings logged, loop continues/completes).
+- Files changed: `src/server/githubCommitService.ts`, `src/server/index.ts`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run typecheck` passed
+  - `npm run lint` passed
+  - `npm run build` passed
+  - `npm test` passed (`No tests yet`)
+- Image-analysis observation: Not applicable (backend GitHub automation story, no UI layout changes).
+- **Learnings for future iterations:**
+  - For optional external integrations, validate paired config fields together (`githubUrl` + `githubToken`) and fail fast before expensive analysis/spawn work.
+  - Generate README score history from a dedicated in-memory session ledger so every commit (including `[final]`) carries a coherent iteration trail.
 ---

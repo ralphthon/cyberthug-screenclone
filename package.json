@@ -17,6 +17,7 @@
     "test:smoke:ui": "npx playwright test tests/smoke/ --ui"
   },
   "dependencies": {
+    "@octokit/rest": "^22.0.1",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "multer": "^2.1.0",
