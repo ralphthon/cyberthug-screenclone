@@ -15,6 +15,7 @@
 - For visual compare endpoints, normalize both original/generated images to the same PNG dimensions before running vision and pixel diff so both scoring signals evaluate identical geometry.
 - For SSE-backed loop sessions, keep a bounded per-session event buffer and replay it on connect so reconnecting clients recover missed timeline events.
 - For SSE-driven timelines, dedupe replayed events by SSE `lastEventId` and combine with a 3s reconnect backoff so UI cards do not duplicate across disconnect/reconnect cycles.
+- For synchronized comparison panes, keep zoom/pan in one shared transform state and apply it across original/generated/diff canvases; set `touch-action: none` on the canvas to keep pointer drag interactions reliable.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -292,4 +293,22 @@
   - Timeline cards should be keyed by iteration number and merged via upsert to handle `iteration-start` then `iteration-complete` event sequences without duplicate entries.
   - Keep loop event parsing defensive (`number|string` coercion) because SSE payload fields can vary by source and reconnection replay.
   - Separate loop runtime status (`running|complete|error`) from transport status (`connected|reconnecting`) to keep UI state transitions clear during SSE interruptions.
+---
+## 2026-02-28 15:22:56 UTC - US-011
+- Implemented the side-by-side comparison workspace for iteration outputs with three modes: `Side-by-Side`, `Slider`, and `Diff Overlay`.
+- Added an iteration dropdown (defaulting to latest available iteration), keyboard navigation (`ArrowLeft`/`ArrowRight`) to move between iterations, and `Space` to toggle diff overlay mode.
+- Added synchronized compare interactions across all modes: shared zoom state (mouse wheel) and shared pan state (drag while zoomed) applied to original, generated, and diff imagery.
+- Added slider mode with clip-path blending and a draggable vertical divider handle plus percentage indicator.
+- Added similarity score UI with red-to-green gradient progress bar and decimal score display.
+- Files changed: `src/client/src/App.tsx`, `src/client/src/index.css`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics` passed for `src/client/src/App.tsx` (0 errors)
+  - `mcp lsp_diagnostics_directory` passed for project root (0 errors)
+  - `npm run lint` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implementation behavior/structure against `designs/mockups/us011.png` and related supplied mocks; marked as **pass** for required US-011 controls and interactions. Automated browser screenshot diffing is not configured in this harness, so final pixel-perfect validation remains manual.
+- **Learnings for future iterations:**
+  - Keep comparison interactions (`zoom`, `pan`, selected iteration) centralized in one state layer so mode switches do not desynchronize the image transforms.
+  - For slider compare UX, combine CSS clip-path blending with pointer-driven divider movement rather than only a range input to satisfy direct-manipulation requirements.
 ---

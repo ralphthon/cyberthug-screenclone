@@ -11,6 +11,18 @@ body {
   min-width: 320px;
 }
 
+.comparison-canvas {
+  touch-action: none;
+}
+
+.comparison-image {
+  height: 100%;
+  width: 100%;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
+}
+
 .loading-spinner {
   width: 22px;
   height: 22px;

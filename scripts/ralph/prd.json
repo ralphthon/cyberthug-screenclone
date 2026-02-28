@@ -254,9 +254,9 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Slider: use CSS clip-path: inset(0 {100-sliderPos}% 0 0) on overlay image. Synchronized zoom/pan via shared transform state.",
-      "status": "pending"
+      "status": "passed"
     },
     {
       "id": "US-012",

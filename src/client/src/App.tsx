@@ -36,6 +36,8 @@ type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnect
 
 type IterationState = 'running' | 'complete' | 'error';
 
+type ComparisonMode = 'side-by-side' | 'slider' | 'diff';
+
 type LoopEventName = 'iteration-start' | 'iteration-complete' | 'loop-complete' | 'loop-error';
 
 type LoopStartRequest = {
@@ -72,6 +74,11 @@ type IterationCard = {
   commitUrl: string | null;
   elapsedMs: number | null;
   error: string | null;
+};
+
+type SharedPanPoint = {
+  x: number;
+  y: number;
 };
 
 type UploadResponse = {
@@ -214,6 +221,22 @@ function toDataUrl(base64: string | null): string | null {
   return `data:image/png;base64,${base64}`;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeWheelDelta(event: React.WheelEvent<HTMLDivElement>): number {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    return event.deltaY * 15;
+  }
+
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return event.deltaY * 40;
+  }
+
+  return event.deltaY;
+}
+
 function App(): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toastTimersRef = useRef<number[]>([]);
@@ -224,6 +247,11 @@ function App(): JSX.Element {
   const newestAnchorRef = useRef<HTMLDivElement | null>(null);
   const isAtNewestRef = useRef(true);
   const loopStatusRef = useRef<LoopStatus>('idle');
+  const comparisonViewportRef = useRef<HTMLDivElement | null>(null);
+  const sliderCanvasRef = useRef<HTMLDivElement | null>(null);
+  const activeSliderPointerIdRef = useRef<number | null>(null);
+  const isPanningRef = useRef(false);
+  const panAnchorRef = useRef<{ pointerX: number; pointerY: number; panX: number; panY: number } | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -242,6 +270,11 @@ function App(): JSX.Element {
   );
   const [expandedIteration, setExpandedIteration] = useState<number | null>(null);
   const [iterationCards, setIterationCards] = useState<Record<number, IterationCard>>({});
+  const [selectedComparisonIteration, setSelectedComparisonIteration] = useState<number | null>(null);
+  const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('side-by-side');
+  const [sliderPosition, setSliderPosition] = useState(50);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [panOffset, setPanOffset] = useState<SharedPanPoint>({ x: 0, y: 0 });
 
   const previews = useMemo<PreviewItem[]>(
     () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -251,6 +284,19 @@ function App(): JSX.Element {
   const orderedIterations = useMemo(() => {
     return Object.values(iterationCards).sort((a, b) => b.iteration - a.iteration);
   }, [iterationCards]);
+
+  const currentComparisonIteration = useMemo(() => {
+    if (selectedComparisonIteration !== null && iterationCards[selectedComparisonIteration]) {
+      return iterationCards[selectedComparisonIteration];
+    }
+
+    return orderedIterations[0] ?? null;
+  }, [iterationCards, orderedIterations, selectedComparisonIteration]);
+
+  const currentComparisonScore = currentComparisonIteration?.score ?? null;
+  const currentComparisonImage = toDataUrl(currentComparisonIteration?.screenshotBase64 ?? null);
+  const selectedDiffImage = toDataUrl(currentComparisonIteration?.diffImageBase64 ?? null);
+  const referencePreview = previews[0]?.url ?? null;
 
   useEffect(() => {
     loopStatusRef.current = loopStatus;
@@ -334,6 +380,80 @@ function App(): JSX.Element {
       behavior: 'smooth',
     });
   }, [orderedIterations.length]);
+
+  useEffect(() => {
+    if (orderedIterations.length === 0) {
+      if (selectedComparisonIteration !== null) {
+        setSelectedComparisonIteration(null);
+      }
+      return;
+    }
+
+    if (selectedComparisonIteration === null || !iterationCards[selectedComparisonIteration]) {
+      setSelectedComparisonIteration(orderedIterations[0]?.iteration ?? null);
+    }
+  }, [iterationCards, orderedIterations, selectedComparisonIteration]);
+
+  useEffect(() => {
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
+  }, [currentComparisonIteration?.iteration, comparisonMode]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (orderedIterations.length === 0) {
+        return;
+      }
+
+      const hasInputFocus =
+        document.activeElement instanceof HTMLElement &&
+        (document.activeElement.tagName === 'INPUT' ||
+          document.activeElement.tagName === 'TEXTAREA' ||
+          document.activeElement.tagName === 'SELECT');
+
+      if (hasInputFocus) {
+        return;
+      }
+
+      if (event.code === 'Space') {
+        event.preventDefault();
+        setComparisonMode((previous) => (previous === 'diff' ? 'side-by-side' : 'diff'));
+        return;
+      }
+
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+        return;
+      }
+
+      event.preventDefault();
+
+      setSelectedComparisonIteration((previous) => {
+        if (orderedIterations.length === 0) {
+          return null;
+        }
+
+        const sortedAscending = [...orderedIterations].sort((a, b) => a.iteration - b.iteration);
+        const currentIteration = previous ?? sortedAscending[sortedAscending.length - 1]?.iteration ?? null;
+        if (currentIteration === null) {
+          return null;
+        }
+
+        const currentIndex = sortedAscending.findIndex((card) => card.iteration === currentIteration);
+        if (currentIndex === -1) {
+          return sortedAscending[sortedAscending.length - 1]?.iteration ?? null;
+        }
+
+        const direction = event.key === 'ArrowRight' ? 1 : -1;
+        const targetIndex = clamp(currentIndex + direction, 0, sortedAscending.length - 1);
+        return sortedAscending[targetIndex]?.iteration ?? currentIteration;
+      });
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [orderedIterations]);
 
   const addToast = useCallback((message: string) => {
     const toastId = Date.now() + Math.floor(Math.random() * 1000);
@@ -737,6 +857,11 @@ function App(): JSX.Element {
     setLoopSummary(null);
     setIterationCards({});
     setExpandedIteration(null);
+    setSelectedComparisonIteration(null);
+    setComparisonMode('slider');
+    setSliderPosition(50);
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
     setIsCloneRunning(true);
 
     window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(cloneConfig));
@@ -814,6 +939,137 @@ function App(): JSX.Element {
 
   const canStartClone = cloneConfig.projectName.trim().length > 0 && files.length > 0 && !isCloneRunning;
   const dropZoneDisabled = files.length >= MAX_FILES;
+
+  const handleComparisonWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (!comparisonViewportRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const viewport = comparisonViewportRef.current;
+      const rect = viewport.getBoundingClientRect();
+      const pointerX = event.clientX - rect.left;
+      const pointerY = event.clientY - rect.top;
+      const wheelDelta = normalizeWheelDelta(event);
+      const scaleFactor = wheelDelta < 0 ? 1.1 : 0.9;
+
+      setZoomScale((previousScale) => {
+        const nextScale = clamp(previousScale * scaleFactor, 1, 4);
+        if (nextScale === previousScale) {
+          return previousScale;
+        }
+
+        setPanOffset((previousPan) => {
+          const relativeX = (pointerX - previousPan.x) / previousScale;
+          const relativeY = (pointerY - previousPan.y) / previousScale;
+          return {
+            x: pointerX - relativeX * nextScale,
+            y: pointerY - relativeY * nextScale,
+          };
+        });
+
+        return nextScale;
+      });
+    },
+    [comparisonViewportRef],
+  );
+
+  const updateSliderPositionFromPointer = useCallback((clientX: number) => {
+    const sliderCanvas = sliderCanvasRef.current;
+    if (!sliderCanvas) {
+      return;
+    }
+
+    const sliderRect = sliderCanvas.getBoundingClientRect();
+    if (sliderRect.width <= 0) {
+      return;
+    }
+
+    const relativePercent = ((clientX - sliderRect.left) / sliderRect.width) * 100;
+    setSliderPosition(clamp(relativePercent, 0, 100));
+  }, []);
+
+  const handleSliderCanvasPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (zoomScale > 1) {
+        return;
+      }
+
+      activeSliderPointerIdRef.current = event.pointerId;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      updateSliderPositionFromPointer(event.clientX);
+    },
+    [updateSliderPositionFromPointer, zoomScale],
+  );
+
+  const handleSliderCanvasPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (activeSliderPointerIdRef.current !== event.pointerId) {
+        return;
+      }
+
+      updateSliderPositionFromPointer(event.clientX);
+    },
+    [updateSliderPositionFromPointer],
+  );
+
+  const handleSliderCanvasPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (activeSliderPointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    activeSliderPointerIdRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  const beginPan = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (zoomScale <= 1) {
+        return;
+      }
+
+      const target = event.currentTarget;
+      target.setPointerCapture(event.pointerId);
+      isPanningRef.current = true;
+      panAnchorRef.current = {
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+        panX: panOffset.x,
+        panY: panOffset.y,
+      };
+    },
+    [panOffset.x, panOffset.y, zoomScale],
+  );
+
+  const continuePan = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isPanningRef.current || !panAnchorRef.current) {
+      return;
+    }
+
+    const offsetX = event.clientX - panAnchorRef.current.pointerX;
+    const offsetY = event.clientY - panAnchorRef.current.pointerY;
+
+    setPanOffset({
+      x: panAnchorRef.current.panX + offsetX,
+      y: panAnchorRef.current.panY + offsetY,
+    });
+  }, []);
+
+  const endPan = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    isPanningRef.current = false;
+    panAnchorRef.current = null;
+  }, []);
+
+  const comparisonTransform = `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`;
+  const similarityPercent = currentComparisonScore !== null ? clamp(currentComparisonScore, 0, 100) : 0;
+  const sliderClip = `inset(0 ${100 - sliderPosition}% 0 0)`;
 
   return (
     <main className="min-h-screen bg-surface text-slate-100">
@@ -1170,6 +1426,219 @@ function App(): JSX.Element {
               </div>
             )}
           </div>
+        </section>
+
+        <section className="mx-auto mt-8 w-full max-w-4xl rounded-2xl border border-slate-700 bg-card/70 p-5 shadow-lg shadow-black/20">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-2xl font-semibold text-slate-100">
+              Compare: Iteration #{currentComparisonIteration?.iteration ?? 'n/a'}
+            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setComparisonMode('slider')}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  comparisonMode === 'slider'
+                    ? 'bg-primary text-white'
+                    : 'bg-surface/70 text-slate-300 hover:bg-surface hover:text-slate-100'
+                }`}
+              >
+                Slider
+              </button>
+              <button
+                type="button"
+                onClick={() => setComparisonMode('diff')}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  comparisonMode === 'diff'
+                    ? 'bg-primary text-white'
+                    : 'bg-surface/70 text-slate-300 hover:bg-surface hover:text-slate-100'
+                }`}
+              >
+                Diff Overlay
+              </button>
+              <button
+                type="button"
+                onClick={() => setComparisonMode('side-by-side')}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  comparisonMode === 'side-by-side'
+                    ? 'bg-primary text-white'
+                    : 'bg-surface/70 text-slate-300 hover:bg-surface hover:text-slate-100'
+                }`}
+              >
+                Side-by-Side
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-slate-300">
+            <label htmlFor="compare-iteration" className="font-medium text-slate-200">
+              Iteration
+            </label>
+            <select
+              id="compare-iteration"
+              value={currentComparisonIteration?.iteration ?? ''}
+              onChange={(event) => setSelectedComparisonIteration(Number(event.target.value))}
+              className="rounded-md border border-slate-700 bg-surface/80 px-3 py-1.5 text-sm text-slate-100 outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+              disabled={orderedIterations.length === 0}
+            >
+              {orderedIterations.map((card) => (
+                <option key={card.iteration} value={card.iteration}>
+                  Iteration #{card.iteration}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-400">Keyboard: ←/→ switch iteration, Space toggles mode</p>
+          </div>
+
+          {currentComparisonIteration && currentComparisonImage && referencePreview ? (
+            <>
+              <div
+                ref={comparisonViewportRef}
+                className={`relative overflow-hidden rounded-xl border border-slate-700 bg-surface/70 ${
+                  zoomScale > 1 ? 'cursor-grab active:cursor-grabbing' : 'cursor-zoom-in'
+                }`}
+                onWheel={handleComparisonWheel}
+                onPointerDown={beginPan}
+                onPointerMove={continuePan}
+                onPointerUp={endPan}
+                onPointerCancel={endPan}
+              >
+                {comparisonMode === 'side-by-side' ? (
+                  <div className="grid gap-3 p-3 md:grid-cols-2">
+                    <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-900/70">
+                      <p className="border-b border-slate-700 px-3 py-2 text-sm font-medium text-slate-300">Original</p>
+                      <div className="comparison-canvas relative h-[18rem] overflow-hidden">
+                        <img
+                          src={referencePreview}
+                          alt="Original screenshot"
+                          className="comparison-image"
+                          style={{ transform: comparisonTransform }}
+                          draggable={false}
+                        />
+                      </div>
+                    </div>
+                    <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-900/70">
+                      <p className="border-b border-slate-700 px-3 py-2 text-sm font-medium text-slate-300">
+                        Generated - {currentComparisonScore !== null ? `${currentComparisonScore.toFixed(1)}% match` : 'n/a'}
+                      </p>
+                      <div className="comparison-canvas relative h-[18rem] overflow-hidden">
+                        <img
+                          src={currentComparisonImage}
+                          alt={`Generated clone iteration ${currentComparisonIteration.iteration}`}
+                          className="comparison-image"
+                          style={{ transform: comparisonTransform }}
+                          draggable={false}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {comparisonMode === 'slider' ? (
+                  <div className="relative p-3">
+                    <div
+                      ref={sliderCanvasRef}
+                      className="comparison-canvas relative h-[22rem] overflow-hidden rounded-lg border border-slate-700 bg-slate-900/70"
+                      onPointerDown={handleSliderCanvasPointerDown}
+                      onPointerMove={handleSliderCanvasPointerMove}
+                      onPointerUp={handleSliderCanvasPointerUp}
+                      onPointerCancel={handleSliderCanvasPointerUp}
+                    >
+                      <img
+                        src={referencePreview}
+                        alt="Original screenshot"
+                        className="comparison-image"
+                        style={{ transform: comparisonTransform }}
+                        draggable={false}
+                      />
+                      <img
+                        src={currentComparisonImage}
+                        alt={`Generated clone iteration ${currentComparisonIteration.iteration}`}
+                        className="comparison-image absolute inset-0"
+                        style={{ transform: comparisonTransform, clipPath: sliderClip }}
+                        draggable={false}
+                      />
+                      <div
+                        className="pointer-events-none absolute inset-y-0 z-10 w-px bg-indigo-300/90"
+                        style={{ left: `${sliderPosition}%` }}
+                      >
+                        <span className="absolute left-1/2 top-1/2 block h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-indigo-300/80 bg-indigo-500/25 shadow-[0_0_14px_rgba(99,102,241,0.5)]" />
+                      </div>
+                      <div
+                        className="pointer-events-none absolute bottom-3 right-3 rounded-md bg-surface/90 px-2 py-1 text-xs font-semibold text-slate-100"
+                        style={{ transform: `translateX(${(sliderPosition - 50) * 1.2}px)` }}
+                      >
+                        {sliderPosition.toFixed(0)}%
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center gap-3 text-sm text-slate-300">
+                      <span>Reveal</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={sliderPosition}
+                        onChange={(event) => setSliderPosition(Number(event.target.value))}
+                        className="h-1 w-full accent-indigo-400"
+                      />
+                      <span>{sliderPosition.toFixed(0)}%</span>
+                    </div>
+                  </div>
+                ) : null}
+
+                {comparisonMode === 'diff' ? (
+                  <div className="p-3">
+                    <div className="comparison-canvas relative h-[22rem] overflow-hidden rounded-lg border border-slate-700 bg-slate-900/70">
+                      <img
+                        src={referencePreview}
+                        alt="Original screenshot"
+                        className="comparison-image"
+                        style={{ transform: comparisonTransform }}
+                        draggable={false}
+                      />
+                      {selectedDiffImage ? (
+                        <img
+                          src={selectedDiffImage}
+                          alt={`Diff overlay iteration ${currentComparisonIteration.iteration}`}
+                          className="comparison-image absolute inset-0 opacity-70 mix-blend-screen"
+                          style={{ transform: comparisonTransform }}
+                          draggable={false}
+                        />
+                      ) : (
+                        <div className="absolute inset-0 grid place-items-center text-sm text-slate-400">
+                          No diff image available for this iteration.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-4">
+                <div className="mb-1 flex items-center justify-between text-sm text-slate-300">
+                  <span>Similarity</span>
+                  <span className={getScoreColorClass(currentComparisonScore)}>
+                    {currentComparisonScore !== null ? `${currentComparisonScore.toFixed(1)}%` : 'n/a'}
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-red-500 via-yellow-400 to-emerald-400 transition-all"
+                    style={{ width: `${similarityPercent}%` }}
+                  />
+                </div>
+                <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+                  <span>Zoom: {zoomScale.toFixed(2)}x</span>
+                  <span>Mouse wheel to zoom, drag to pan when zoomed</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-xl border border-dashed border-slate-700 bg-surface/50 px-4 py-10 text-center text-sm text-slate-400">
+              Start cloning and complete an iteration to unlock comparison modes.
+            </div>
+          )}
         </section>
       </div>
 
