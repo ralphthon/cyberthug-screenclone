@@ -42,9 +42,9 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Use react-dropzone or native drag events. Object URLs for previews — revoke on remove/unmount to prevent memory leaks.",
-      "status": "pending"
+      "status": "passed"
     },
     {
       "id": "US-003",

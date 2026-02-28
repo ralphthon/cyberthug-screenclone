@@ -3,6 +3,7 @@
 - Keep ESLint parser settings non-project-bound in this mixed workspace unless every TS file is covered by tsconfig references.
 - Keep client and server TypeScript configs separate (`src/client/tsconfig.json` and `src/server/tsconfig.json`) and validate both in `npm run typecheck`.
 - For image previews, keep canonical upload state as `File[]` and always revoke `URL.createObjectURL(...)` values in cleanup.
+- For file picker flows, reset the hidden input value after handling `onChange` so re-selecting the same file still triggers an event.
 - For numeric settings inputs, keep React state as strings for controlled fields and validate/coerce at submit time before persistence.
 - For server uploads, attach per-request session metadata to the Express request before Multer runs, and always clean up the session temp directory immediately on failed upload paths.
 - For long-running backend workers, isolate orchestration in a manager class (spawn + ring buffer + fs.watch progress parsing) and always wire server `SIGTERM`/`SIGINT` to graceful child-process shutdown.
@@ -109,4 +110,20 @@
   - Keep frontend/backend TS projects isolated and aggregate checks in root scripts (`build`, `typecheck`) to keep smoke checks predictable.
   - ESLint v9 flat config works well here, but avoid project-service coupling unless every TS file in the workspace is included in referenced tsconfigs.
   - Use timeout startup probes for long-running dev scripts to confirm port bindings without hanging iterations.
+---
+## 2026-02-28 13:16:05 UTC - US-002
+- Implemented drag-and-drop screenshot upload UI on the main page with native drag events, click-to-browse fallback, and keyboard activation (Enter/Space) for accessibility.
+- Added upload validation for accepted MIME types (`image/png`, `image/jpeg`, `image/webp`), max 10MB/file, and max 5 total files; invalid inputs now surface toast-style error messages.
+- Added 5-slot thumbnail grid with per-image remove controls, drop-zone disable/re-enable behavior at max capacity, and `FormData` preparation from in-memory `File[]` state using `screenshots` field entries.
+- Files changed: `src/client/src/App.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implementation intent to `/designs/mockups/us002.png`; required uploader elements and dark styling are implemented, but automated browser screenshot diffing is not available in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - Keep upload pipeline state canonical as `File[]` and derive preview URLs and request `FormData` from that source-of-truth to avoid desynchronization.
+  - For transient toast UX in React, keep timer IDs in refs and clear them on unmount to avoid stale state updates.
 ---
