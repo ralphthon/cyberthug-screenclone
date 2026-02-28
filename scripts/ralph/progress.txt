@@ -2,6 +2,7 @@
 - Use ESLint v9 flat config in `eslint.config.js`; `.eslintrc.*` is ignored.
 - Keep client and server TypeScript configs separate (`src/client/tsconfig.json` and `src/server/tsconfig.json`) and validate both in `npm run typecheck`.
 - For numeric settings inputs, keep React state as strings for controlled fields and validate/coerce at submit time before persistence.
+- For server uploads, attach per-request session metadata to the Express request before Multer runs, and always clean up the session temp directory immediately on failed upload paths.
 
 ## 2026-02-28 07:26:01 UTC - US-001
 - Implemented initial ScreenClone scaffold with Vite + React + TypeScript + Tailwind frontend, Express backend, shared types, and root tooling/scripts.
@@ -33,4 +34,22 @@
 - **Learnings for future iterations:**
   - Keep clone settings persistence shape aligned with controlled input state (`string` values) to avoid uncontrolled/number parsing issues.
   - Inline validation + toast errors can coexist: use inline for field-level issues and toast for workflow preconditions (e.g., missing uploads).
+---
+
+## 2026-02-28 08:01:41 UTC - US-004
+- Implemented Express multipart upload API with Multer: `POST /api/upload` now accepts up to 5 `screenshots` files, enforces 10MB/file, restricts MIME types (`image/png`, `image/jpeg`, `image/webp`), and writes files into per-request session temp directories under `/tmp/ralphton-{sessionId}` using UUIDv4 session IDs.
+- Added backend reliability and safety handling around uploads: consistent JSON API errors (`{ error, code }`), stale temp directory cleanup for `ralphton-*` dirs older than 24h via interval task, immediate cleanup for failed/empty uploads, and image-signature validation (PNG/JPEG/WEBP magic bytes) so spoofed MIME uploads are rejected.
+- Kept health contract intact and typed (`GET /api/health` returns `{ status: 'ok', version: '1.0.0' }`).
+- Files changed: `src/server/index.ts`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - Runtime API verification passed via local `curl` probes for health, successful upload, no-files rejection, invalid-type rejection, too-many-files rejection, and spoofed MIME/content mismatch rejection.
+- Image-analysis observation: Not applicable (backend API story, no UI changes).
+- **Learnings for future iterations:**
+  - For upload endpoints in this repo, initialize and stash request-scoped session metadata (`uploadSessionId`, `uploadSessionDir`) on `express-serve-static-core` request augmentation before invoking Multer storage callbacks.
+  - Multer MIME filtering alone is insufficient for trust boundaries; add post-write magic-byte validation for allowed image formats and fail fast with cleanup.
+  - On upload errors after directory creation, always remove the session directory immediately to avoid stale artifact buildup between interval cleanup runs.
 ---
