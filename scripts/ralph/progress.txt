@@ -1,1 +1,19 @@
+## Codebase Patterns
+- Use ESLint v9 flat config in `eslint.config.js`; `.eslintrc.*` is ignored.
+- Keep client and server TypeScript configs separate (`src/client/tsconfig.json` and `src/server/tsconfig.json`) and validate both in `npm run typecheck`.
 
+## 2026-02-28 07:26:01 UTC - US-001
+- Implemented initial ScreenClone scaffold with Vite + React + TypeScript + Tailwind frontend, Express backend, shared types, and root tooling/scripts.
+- Added dark-mode default landing UI with gradient `RalphTon` heading on `#1e1b2e`, plus backend CORS for `http://localhost:5173` and `/api/health` endpoint.
+- Files changed: `package.json`, `package-lock.json`, `.gitignore`, `.prettierrc`, `.prettierignore`, `eslint.config.js`, `postcss.config.cjs`, `tailwind.config.ts`, `tsconfig.base.json`, `tsconfig.json`, `src/client/index.html`, `src/client/vite.config.ts`, `src/client/tsconfig.json`, `src/client/src/App.tsx`, `src/client/src/main.tsx`, `src/client/src/index.css`, `src/client/src/vite-env.d.ts`, `src/server/index.ts`, `src/server/tsconfig.json`, `src/shared/types/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `npm run typecheck` passed
+  - `npm run lint` passed
+  - `npm test` passed
+  - Startup checks passed via timeout probes (`npm run dev` showed `http://localhost:5173`, `npm run server` showed `http://localhost:3001`)
+- Image-analysis observation (UI story): Browser/image automation tools unavailable in this harness, so mockup-to-UI visual comparison is pending manual verification.
+- **Learnings for future iterations:**
+  - ESLint v9 in this repo requires flat config (`eslint.config.js`).
+  - Port expectations are fixed by US-001: frontend `5173`, backend `3001`.
+  - `timeout 20s` startup probes are a fast way to verify long-running dev scripts without hanging the iteration.
+---
