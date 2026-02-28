@@ -443,9 +443,9 @@
         "Typecheck passes"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": "Use CSS custom properties for theme colors. Prevent FOUC: inject theme class in <script> block in index.html before React hydrates. TailwindCSS dark: variant for all components.",
-      "status": "pending"
+      "status": "passed"
     },
     {
       "id": "US-020",

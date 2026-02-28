@@ -23,6 +23,7 @@ const MAX_FILES = 5;
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const ACCEPTED_FILE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const CONFIG_STORAGE_KEY = 'ralphton-config';
+const THEME_STORAGE_KEY = 'ralphton-theme';
 const SSE_RECONNECT_MS = 3_000;
 
 type Toast = {
@@ -54,6 +55,7 @@ type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnect
 type IterationState = 'running' | 'complete' | 'error';
 
 type ComparisonMode = 'side-by-side' | 'slider' | 'diff';
+type ThemeMode = 'dark' | 'light';
 
 type LoopEventName = 'iteration-start' | 'iteration-complete' | 'loop-complete' | 'loop-error';
 
@@ -179,6 +181,10 @@ function parseString(value: unknown): string | null {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseTheme(value: unknown): ThemeMode | null {
+  return value === 'dark' || value === 'light' ? value : null;
 }
 
 function parseEventData(rawData: string): Record<string, unknown> | null {
@@ -379,6 +385,9 @@ function App(): JSX.Element {
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState<SharedPanPoint>({ x: 0, y: 0 });
   const [isScoreChartExpanded, setIsScoreChartExpanded] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() =>
+    document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+  );
 
   const previews = useMemo<PreviewItem[]>(
     () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -408,6 +417,16 @@ function App(): JSX.Element {
     }
     return clamp(parsed, 0, 100);
   }, [cloneConfig.targetSimilarity]);
+  const activeProjectName = cloneConfig.projectName.trim();
+  const runningScore = useMemo(() => {
+    for (const card of orderedIterations) {
+      if (card.score !== null) {
+        return clamp(card.score, 0, 100);
+      }
+    }
+
+    return null;
+  }, [orderedIterations]);
 
   const fallbackArchiveBytesEstimate = useMemo(() => {
     const uploadedBytes = files.reduce((total, file) => total + file.size, 0);
@@ -462,9 +481,36 @@ function App(): JSX.Element {
     }, scoreChartData[0]);
   }, [scoreChartData]);
 
+  const chartColors = useMemo(
+    () => ({
+      grid: 'rgb(var(--color-chart-grid) / 0.28)',
+      axis: 'rgb(var(--color-chart-axis))',
+      tooltipBackground: 'rgb(var(--color-chart-tooltip) / 0.96)',
+      target: 'rgb(var(--color-chart-target))',
+    }),
+    [],
+  );
+
   useEffect(() => {
     loopStatusRef.current = loopStatus;
   }, [loopStatus]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('dark', themeMode === 'dark');
+    root.dataset.theme = themeMode;
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
+    if (loopStatus === 'running' && activeProjectName.length > 0) {
+      const scoreText = runningScore !== null ? `${Math.round(runningScore)}%` : '--%';
+      document.title = `RalphTon — ${scoreText} | ${activeProjectName}`;
+      return;
+    }
+
+    document.title = 'RalphTon';
+  }, [activeProjectName, loopStatus, runningScore]);
 
   useEffect(() => {
     return () => {
@@ -504,6 +550,16 @@ function App(): JSX.Element {
     } catch {
       window.localStorage.removeItem(CONFIG_STORAGE_KEY);
     }
+  }, []);
+
+  useEffect(() => {
+    const savedTheme = parseTheme(window.localStorage.getItem(THEME_STORAGE_KEY));
+    if (savedTheme) {
+      setThemeMode(savedTheme);
+      return;
+    }
+
+    setThemeMode(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
   }, []);
 
   useEffect(() => {
@@ -1458,7 +1514,7 @@ function App(): JSX.Element {
     : `📦 Download ZIP (${downloadEstimatePrefix}${formatFileSize(resolvedArchiveEstimate)})`;
 
   return (
-    <main className="min-h-screen bg-surface text-slate-100">
+    <main className="min-h-screen bg-surface text-slate-100 transition-colors duration-200">
       <div className="pointer-events-none fixed right-5 top-5 z-20 flex w-full max-w-sm flex-col gap-3">
         {toasts.map((toast) => (
           <p
@@ -1470,29 +1526,51 @@ function App(): JSX.Element {
         ))}
       </div>
 
-      <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-8 xl:pr-[28rem]">
-        <header className="mb-10 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+      <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-6 sm:px-6 sm:py-8 xl:pr-[28rem]">
+        <header className="mb-8 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-indigo-400 to-indigo-600 text-xs font-bold text-white">
               SC
             </span>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-100">ScreenClone</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-100 sm:text-3xl">ScreenClone</h1>
+            {loopStatus !== 'idle' && activeProjectName.length > 0 ? (
+              <span className="max-w-[16rem] truncate rounded-full border border-slate-700 bg-card/70 px-3 py-1 text-xs font-semibold text-slate-200">
+                {activeProjectName}
+              </span>
+            ) : null}
+            {loopStatus === 'running' ? (
+              <span className="rounded-full border border-emerald-500/50 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300">
+                {runningScore !== null ? `${runningScore.toFixed(1)}%` : 'Running'}
+              </span>
+            ) : null}
           </div>
 
-          {loopStatus === 'complete' && loopSessionId ? (
+          <nav className="ml-auto flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
-              onClick={() => {
-                void handleDownloadArchive();
-              }}
-              disabled={isDownloadingArchive}
-              title={downloadArchiveName ?? undefined}
-              className="rounded-lg border border-indigo-400/60 bg-indigo-500/20 px-4 py-2 text-sm font-semibold text-indigo-100 transition hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => setThemeMode((previous) => (previous === 'dark' ? 'light' : 'dark'))}
+              className="rounded-lg border border-slate-600 bg-surface/70 px-3 py-2 text-sm font-semibold text-slate-200 transition-colors duration-150 hover:border-indigo-400/70 hover:text-indigo-300"
+              aria-label={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={themeMode === 'dark' ? 'Dark mode' : 'Light mode'}
             >
-              {downloadButtonLabel}
-              {isDownloadEstimateLoading && downloadEstimateBytes === null ? ' ...' : ''}
+              {themeMode === 'dark' ? '🌙' : '☀️'}
             </button>
-          ) : null}
+
+            {loopStatus === 'complete' && loopSessionId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleDownloadArchive();
+                }}
+                disabled={isDownloadingArchive}
+                title={downloadArchiveName ?? undefined}
+                className="rounded-lg border border-indigo-400/60 bg-indigo-500/20 px-4 py-2 text-sm font-semibold text-indigo-100 transition-colors duration-150 hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {downloadButtonLabel}
+                {isDownloadEstimateLoading && downloadEstimateBytes === null ? ' ...' : ''}
+              </button>
+            ) : null}
+          </nav>
         </header>
 
         <section className="mx-auto w-full max-w-2xl">
@@ -1720,10 +1798,38 @@ function App(): JSX.Element {
             <div ref={newestAnchorRef} />
 
             {orderedIterations.length === 0 ? (
-              <div className="flex min-h-44 flex-col items-center justify-center gap-3 text-slate-300">
-                <span className="loading-spinner" aria-hidden="true" />
-                <p className="text-sm">Waiting for first iteration update...</p>
-              </div>
+              loopStatus === 'running' ? (
+                <div className="space-y-3">
+                  {Array.from({ length: 3 }, (_, index) => (
+                    <article
+                      key={`skeleton-${index}`}
+                      className="rounded-xl border border-slate-700 bg-card/70 p-3"
+                      aria-label="Loading timeline card"
+                    >
+                      <div className="animate-pulse">
+                        <div className="mb-3 flex items-center gap-3">
+                          <div className="h-4 w-4 rounded-full bg-slate-700" />
+                          <div className="h-20 w-28 rounded-md bg-slate-800/80" />
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <div className="h-4 w-40 rounded bg-slate-700" />
+                            <div className="h-3 w-24 rounded bg-slate-700/80" />
+                            <div className="h-3 w-full rounded bg-slate-700/70" />
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                  <div className="flex items-center justify-center gap-2 text-sm text-slate-300">
+                    <span className="loading-spinner" aria-hidden="true" />
+                    Generating first iteration...
+                  </div>
+                </div>
+              ) : (
+                <div className="flex min-h-44 flex-col items-center justify-center gap-3 text-slate-300">
+                  <span className="loading-spinner" aria-hidden="true" />
+                  <p className="text-sm">Waiting for first iteration update...</p>
+                </div>
+              )
             ) : (
               <div className="space-y-3">
                 {orderedIterations.map((card) => {
@@ -1765,6 +1871,9 @@ function App(): JSX.Element {
                             <p className="text-sm font-semibold text-slate-300">
                               {card.maxIterations !== null ? `of ${card.maxIterations}` : 'in progress'}
                             </p>
+                            {isActive ? (
+                              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-indigo-300/35 border-t-indigo-300" />
+                            ) : null}
                             <p className={`text-sm font-semibold ${scoreClass}`}>
                               Score: {card.score !== null ? card.score.toFixed(2) : 'n/a'}
                             </p>
@@ -1832,7 +1941,7 @@ function App(): JSX.Element {
           </div>
           </div>
 
-          <aside className="rounded-2xl border border-slate-700 bg-card/70 p-4 shadow-lg shadow-black/20">
+          <aside className="hidden rounded-2xl border border-slate-700 bg-card/70 p-4 shadow-lg shadow-black/20 lg:block">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h3 className="text-lg font-semibold text-slate-100">Score Progress</h3>
               <button
@@ -1858,28 +1967,28 @@ function App(): JSX.Element {
                 <div className={`${isScoreChartExpanded ? 'h-[400px]' : 'h-[200px]'} w-full`}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={scoreChartData} margin={{ top: 18, right: 16, left: -10, bottom: 10 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,0.22)" vertical={false} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chartColors.grid} vertical={false} />
                       <XAxis
                         dataKey="iteration"
                         type="number"
                         domain={['dataMin', 'dataMax']}
                         allowDecimals={false}
                         tickLine={false}
-                        axisLine={{ stroke: 'rgba(148,163,184,0.35)' }}
-                        tick={{ fill: '#94a3b8', fontSize: 11 }}
+                        axisLine={{ stroke: chartColors.grid }}
+                        tick={{ fill: chartColors.axis, fontSize: 11 }}
                       />
                       <YAxis
                         type="number"
                         domain={[0, 100]}
                         ticks={[0, 20, 40, 60, 80, 100]}
                         tickLine={false}
-                        axisLine={{ stroke: 'rgba(148,163,184,0.35)' }}
-                        tick={{ fill: '#94a3b8', fontSize: 11 }}
+                        axisLine={{ stroke: chartColors.grid }}
+                        tick={{ fill: chartColors.axis, fontSize: 11 }}
                         tickFormatter={(value: number) => `${value}%`}
                         width={34}
                       />
                       <Tooltip
-                        cursor={{ stroke: 'rgba(129,140,248,0.35)', strokeWidth: 1 }}
+                        cursor={{ stroke: chartColors.grid, strokeWidth: 1 }}
                         content={({ active, payload }) => {
                           if (!active || !payload || payload.length === 0) {
                             return null;
@@ -1891,7 +2000,10 @@ function App(): JSX.Element {
                           }
 
                           return (
-                            <div className="rounded-lg border border-slate-700 bg-surface/95 px-3 py-2 text-xs text-slate-200 shadow-xl">
+                            <div
+                              className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 shadow-xl"
+                              style={{ backgroundColor: chartColors.tooltipBackground }}
+                            >
                               <p className="font-semibold text-slate-100">Iteration #{rawPoint.iteration}</p>
                               <p className={getScoreColorClass(rawPoint.score)}>Score: {rawPoint.score.toFixed(2)}%</p>
                               <p className="text-slate-300">Improvement: {formatDelta(rawPoint.improvement)}</p>
@@ -1902,13 +2014,13 @@ function App(): JSX.Element {
                       />
                       <ReferenceLine
                         y={targetScore}
-                        stroke="#f59e0b"
+                        stroke={chartColors.target}
                         strokeDasharray="6 4"
                         ifOverflow="extendDomain"
                         label={{
                           value: `Target ${targetScore.toFixed(0)}%`,
                           position: 'insideTopRight',
-                          fill: '#fbbf24',
+                          fill: chartColors.target,
                           fontSize: 11,
                         }}
                       />

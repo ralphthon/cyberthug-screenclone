@@ -3,12 +3,98 @@
 @tailwind utilities;
 
 :root {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --color-primary: 99 102 241;
+  --color-surface: 241 245 249;
+  --color-card: 226 232 240;
+  --color-slate-50: 248 250 252;
+  --color-slate-100: 15 23 42;
+  --color-slate-200: 30 41 59;
+  --color-slate-300: 51 65 85;
+  --color-slate-400: 71 85 105;
+  --color-slate-500: 100 116 139;
+  --color-slate-600: 100 116 139;
+  --color-slate-700: 148 163 184;
+  --color-slate-800: 203 213 225;
+  --color-slate-900: 226 232 240;
+  --color-chart-grid: 148 163 184;
+  --color-chart-axis: 71 85 105;
+  --color-chart-tooltip: 248 250 252;
+  --color-chart-target: 217 119 6;
+  color-scheme: light;
+  font-family: 'Sora', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+:root.dark {
+  --color-primary: 99 102 241;
+  --color-surface: 30 27 46;
+  --color-card: 42 39 64;
+  --color-slate-50: 248 250 252;
+  --color-slate-100: 241 245 249;
+  --color-slate-200: 226 232 240;
+  --color-slate-300: 203 213 225;
+  --color-slate-400: 148 163 184;
+  --color-slate-500: 100 116 139;
+  --color-slate-600: 71 85 105;
+  --color-slate-700: 51 65 85;
+  --color-slate-800: 30 41 59;
+  --color-slate-900: 15 23 42;
+  --color-chart-grid: 100 116 139;
+  --color-chart-axis: 148 163 184;
+  --color-chart-tooltip: 30 41 59;
+  --color-chart-target: 251 191 36;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
 }
 
 body {
   margin: 0;
   min-width: 320px;
+  background-color: rgb(var(--color-surface));
+  color: rgb(var(--color-slate-100));
+}
+
+main,
+header,
+section,
+aside,
+article,
+div,
+p,
+h1,
+h2,
+h3,
+button,
+input,
+select,
+textarea {
+  transition-property: background-color, border-color, color, box-shadow, opacity, transform;
+  transition-timing-function: ease;
+}
+
+main,
+header,
+section,
+aside,
+article,
+div,
+p,
+h1,
+h2,
+h3,
+input,
+select,
+textarea {
+  transition-duration: 200ms;
+}
+
+button,
+a {
+  transition-duration: 150ms;
 }
 
 .comparison-canvas {
@@ -42,6 +128,14 @@ body {
 
 .success-banner {
   animation: shimmer 2.4s ease-in-out infinite;
+}
+
+.cloney-avatar-float {
+  animation: cloney-avatar-pop 300ms ease both;
+}
+
+.cloney-panel-shell {
+  animation: cloney-panel-slide-in 300ms ease both;
 }
 
 .confetti-dot {
@@ -133,5 +227,29 @@ body {
 
   50% {
     background-color: rgba(16, 185, 129, 0.2);
+  }
+}
+
+@keyframes cloney-avatar-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.84);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes cloney-panel-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

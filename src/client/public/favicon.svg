@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="ralphtonGradient" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818CF8" />
+      <stop offset="1" stop-color="#4F46E5" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#1E1B2E" />
+  <rect x="8" y="8" width="48" height="48" rx="12" fill="url(#ralphtonGradient)" />
+  <path d="M23 17h10.8c8 0 13.2 4.7 13.2 11.8 0 4.8-2.4 8.3-6.5 10.2L48 47h-9.1l-6.2-6.8h-2.2V47H23V17Zm10.2 16.5c3.5 0 5.7-1.8 5.7-4.7 0-3-2.2-4.7-5.7-4.7h-2.7v9.4h2.7Z" fill="#F8FAFC" />
+  <path d="M35 44.2 42.2 52H52l-7.9-8.6H35Z" fill="#A5B4FC" />
+</svg>

@@ -24,6 +24,7 @@
 - For chat-command bridges in React, keep intent execution in the chat component but source action/state from a typed parent-provided bridge object so command parsing stays decoupled from loop orchestration internals.
 - For Cloney command bridging, keep ScreenClone API orchestration in `App.tsx` and pass typed bridge callbacks/event snapshots into `CloneyPanel` so intent parsing stays UI-local while loop state remains single-sourced from SSE.
 - For Cloney loop narration, centralize SSE-to-chat updates through one helper that both appends local chat bubbles and sends OpenWaifu `text-input` payloads with `sender: system`, emotion tags, and expression-index mapping.
+- For dual-theme retrofits, map Tailwind palette tokens (including `slate` shades) to CSS variables and set the initial `<html>` theme class in `index.html` before React mounts to avoid first-paint theme flash.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -444,4 +445,24 @@
 - **Learnings for future iterations:**
   - Route loop-driven Cloney narration through one helper that updates local chat state and emits system-scoped WebSocket `text-input` payloads to keep chat text, TTS, and expressions synchronized.
   - For celebratory/failure emotional UX, combine explicit `play-motion` intents with deterministic expression-index fallback loops so behavior still works when custom motions are unavailable.
+---
+## 2026-02-28 17:59:30 UTC - US-019
+- Implemented full theme/polish pass for the frontend: pre-hydration theme bootstrap in `index.html`, persisted dark/light toggle in navbar, and CSS-variable-driven dual theme tokens across app surfaces/text/borders.
+- Updated navbar composition to include active project chip, running score badge, theme toggle (moon/sun), and retained completion download action.
+- Added timeline polish for loading states: skeleton timeline cards while first iteration is being generated and inline spinner indicator on the active iteration row.
+- Added responsive behavior updates: score sidebar now collapses below `1024px` while timeline remains full-width, and Cloney panel auto-collapses into floating avatar mode on compact viewports.
+- Added graceful UI crash handling with a new React error boundary fallback screen and integrated custom RalphTon favicon.
+- Added theme-safe chart color rendering by binding Recharts axis/grid/target/tooltip colors to theme variables.
+- Added page title updates while loop is running: `RalphTon — {score}% | {projectName}`.
+- Files changed: `src/client/index.html`, `src/client/public/favicon.svg`, `src/client/src/index.css`, `tailwind.config.ts`, `src/client/src/App.tsx`, `src/client/src/components/CloneyPanel.tsx`, `src/client/src/components/ErrorBoundary.tsx`, `src/client/src/main.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implemented structure/states against supplied references (`designs/mockup-v3.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`, `designs/mockups/us015.png`) and marked this iteration as **pass** for required US-019 features (theme toggle, responsive collapse behavior, nav composition, polished loading states). Automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - For reliable no-flash theming in Vite React apps, set `<html>` theme class from a tiny `index.html` bootstrap script before React mounts, then keep React/localStorage in sync.
+  - Mapping Tailwind color tokens (including `slate` shades) to CSS variables is an effective low-churn way to retrofit full light/dark support across an existing dark-first UI.
 ---

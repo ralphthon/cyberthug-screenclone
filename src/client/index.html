@@ -1,8 +1,27 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
+    <script>
+      (function () {
+        var storageKey = 'ralphton-theme';
+        var root = document.documentElement;
+        var nextTheme = 'dark';
+        try {
+          var storedTheme = window.localStorage.getItem(storageKey);
+          if (storedTheme === 'light' || storedTheme === 'dark') {
+            nextTheme = storedTheme;
+          }
+        } catch (error) {
+          // Ignore storage access errors and keep dark default.
+        }
+
+        root.classList.toggle('dark', nextTheme === 'dark');
+        root.dataset.theme = nextTheme;
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>RalphTon</title>
   </head>
   <body>

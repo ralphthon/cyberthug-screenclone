@@ -413,6 +413,9 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const [iframeReachable, setIframeReachable] = useState(true);
   const [iframeReloadKey, setIframeReloadKey] = useState(0);
   const [isVoiceMuted, setIsVoiceMuted] = useState(false);
+  const [isCompactViewport, setIsCompactViewport] = useState(() =>
+    window.matchMedia('(max-width: 1023px)').matches,
+  );
 
   const postMessageToIframe = useCallback((payload: GenericPayload) => {
     const contentWindow = iframeRef.current?.contentWindow;
@@ -661,6 +664,25 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       setIsVoiceMuted(true);
     }
   }, []);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 1023px)');
+    const handleViewportChange = (event: MediaQueryListEvent): void => {
+      setIsCompactViewport(event.matches);
+    };
+
+    setIsCompactViewport(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleViewportChange);
+    return () => {
+      mediaQuery.removeEventListener('change', handleViewportChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isCompactViewport) {
+      setIsPanelCollapsed(true);
+    }
+  }, [isCompactViewport]);
 
   useEffect(() => {
     window.localStorage.setItem(OLV_PANEL_COLLAPSED_STORAGE_KEY, String(isPanelCollapsed));
@@ -1144,7 +1166,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       <button
         type="button"
         onClick={() => setIsPanelCollapsed(false)}
-        className="cloney-avatar-float fixed bottom-6 right-6 z-40 h-16 w-16 rounded-2xl border border-fuchsia-400/50 bg-card/95 text-2xl shadow-[0_0_24px_rgba(217,70,239,0.35)] transition hover:scale-105"
+        className="cloney-avatar-float fixed bottom-6 right-6 z-40 h-16 w-16 rounded-2xl border border-fuchsia-400/50 bg-card/95 text-2xl shadow-[0_0_24px_rgba(217,70,239,0.35)] transition duration-300 hover:scale-105"
         aria-label="Expand Cloney panel"
       >
         <span aria-hidden="true">🤖</span>
@@ -1158,7 +1180,13 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   }
 
   return (
-    <aside className="mt-8 rounded-2xl border border-slate-700 bg-card/80 shadow-lg shadow-black/30 lg:fixed lg:bottom-4 lg:right-4 lg:top-4 lg:z-30 lg:mt-0 lg:w-[min(30vw,420px)] lg:min-w-[320px] lg:overflow-hidden">
+    <aside
+      className={`cloney-panel-shell rounded-2xl border border-slate-700 bg-card/80 shadow-lg shadow-black/30 ${
+        isCompactViewport
+          ? 'fixed inset-x-4 bottom-4 z-40 max-h-[85vh] overflow-hidden'
+          : 'mt-8 lg:fixed lg:bottom-4 lg:right-4 lg:top-4 lg:z-30 lg:mt-0 lg:w-[min(30vw,420px)] lg:min-w-[320px] lg:overflow-hidden'
+      }`}
+    >
       <div className="flex h-full flex-col">
         <header
           className={`border-b border-slate-700/80 px-4 py-3 transition ${
