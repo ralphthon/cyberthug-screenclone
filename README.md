@@ -4,9 +4,42 @@ Clone any website from a screenshot using AI-powered iterative refinement with a
 
 ---
 
-## ⚡ TL;DR — Copy-Paste This to Set Up on a New Machine
+## ⚡ TL;DR — One Command Setup
 
-> **For LLM agents / quick setup:** Copy the entire block below and run it. That's it.
+> **Just run this.** It handles everything — dependencies, environment, tests, and launch.
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/Yeachan-Heo/screenclone-clean.git
+cd screenclone-clean
+git checkout feature/screenclone   # ← active development branch
+
+# 2. Set your API key (if not already in environment)
+export OPENAI_API_KEY="your-layofflabs-api-key"
+
+# 3. Run the one-command setup
+./start.sh
+```
+
+**That's it.** `start.sh` will:
+- Install system dependencies (prompts for sudo if needed)
+- Install Node.js packages
+- Install Playwright + Chromium
+- Check your environment
+- Prompt for missing API keys and save to `.env`
+- Run smoke tests to verify everything works
+- Launch the app at `http://localhost:5173`
+
+**Flags:**
+- `./start.sh --skip-tests` — Skip smoke tests, launch directly
+- `./start.sh --test-only` — Run smoke tests only, don't launch
+
+---
+
+### Manual Setup (if you prefer step-by-step)
+
+<details>
+<summary>Click to expand manual setup steps</summary>
 
 ```bash
 # 1. Clone and enter the repo
@@ -37,13 +70,16 @@ export DASHSCOPE_API_KEY="your-dashscope-key"        # Optional (for Live2D TTS 
 # 6. Verify everything
 ./setup.sh
 
-# 7. Run the app
+# 7. Run smoke tests
+npm run test:smoke
+
+# 8. Run the app
 npm run dev:all
 # Frontend → http://localhost:5173
 # Backend  → http://localhost:3001
 ```
 
-**That's the complete setup.** If `./setup.sh` shows all ✅, you're good to go.
+</details>
 
 ---
 

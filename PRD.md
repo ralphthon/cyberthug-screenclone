@@ -4,7 +4,7 @@
 
 **Branch:** `feature/screenclone`
 
-**Total User Stories:** 21
+**Total User Stories:** 22
 
 
 ## Full Layout Reference
@@ -536,6 +536,78 @@ As a developer, I want OpenWaifu (Open-LLM-VTuber emotion voice + Live2D model p
 
 ---
 
+## US-022: One-command setup and launch script
+
+As a user downloading this project for the first time, I want to run a **single command** that handles the entire setup (dependencies, environment check, build) and launches the app, so I don't need to touch anything manually and risk human error.
+
+### Design
+
+Create `start.sh` — one script that does everything:
+
+```bash
+# The ONLY command a new user needs to run:
+./start.sh
+```
+
+**What `start.sh` does (in order):**
+1. Check Node.js 20+ is installed (exit with clear install instructions if not)
+2. Install system dependencies if missing (Puppeteer libs — prompts for sudo only if needed)
+3. `npm install` (skip if `node_modules` up to date)
+4. Install Playwright + Chromium if not present (`npx playwright install --with-deps chromium`)
+5. Run `./setup.sh` to verify environment
+6. Check for required env vars (`OPENAI_API_KEY`, `OPENAI_BASE_URL`) — if missing, prompt user to enter them and save to `.env`
+7. Run smoke tests (`npx playwright test tests/smoke/`) — abort with clear error if any fail
+8. Start the app (`npm run dev:all`)
+9. Print "✅ Ready! Open http://localhost:5173 in your browser"
+
+**Error handling at each step:**
+- If any step fails → print exactly what went wrong + how to fix it → exit
+- No silent failures, no ambiguous errors
+- Color-coded output: ✅ green for success, ❌ red for errors, ⚠️ yellow for warnings
+
+### Acceptance Criteria
+
+- [ ] `start.sh` at project root, executable (`chmod +x`)
+- [ ] Running `./start.sh` on a fresh Ubuntu 24.04 clone completes without manual intervention (except sudo password if system deps needed)
+- [ ] If Node.js not installed: prints clear install instructions and exits
+- [ ] If `OPENAI_API_KEY` not set: interactively prompts user, saves to `.env` file
+- [ ] If `OPENAI_BASE_URL` not set: defaults to `https://api.layofflabs.com/v1`, saves to `.env`
+- [ ] `.env` file created/updated automatically (not overwritten if exists — only adds missing vars)
+- [ ] `npm install` runs only if `node_modules` is missing or `package-lock.json` changed
+- [ ] Playwright installed only if not already present
+- [ ] Smoke tests run before app launch — if any fail, app does NOT start
+- [ ] On success: app launches and URL is printed
+- [ ] Script is idempotent — running it again skips already-completed steps
+- [ ] Works on Ubuntu 22.04+ and macOS (detect OS, adjust commands)
+- [ ] Total setup time on fresh machine < 5 minutes (excluding downloads)
+- [ ] Typecheck passes
+
+**Notes:** Use `.env` file with `source .env` pattern. Check `node_modules/.package-lock.json` mtime vs `package-lock.json` to skip unnecessary installs. For macOS: skip `apt-get`, use `brew` for system deps if needed.
+
+---
+
+## ST-7: One-Command Setup (start.sh)
+
+> Tests that `start.sh` works end-to-end on a clean environment.
+
+| # | Test | Expected Result |
+|---|------|-----------------|
+| 1 | `./start.sh` on fresh clone (with Node.js + API keys pre-set) | Completes all steps, app launches at localhost:5173 |
+| 2 | Run `./start.sh` again (idempotent) | Skips install steps, goes straight to smoke tests + launch |
+| 3 | Run without `OPENAI_API_KEY` set | Prompts for key, saves to `.env`, continues |
+| 4 | Run without Node.js | Prints install instructions, exits cleanly |
+| 5 | Smoke tests fail (break a component) | Prints failure details, does NOT launch app |
+| 6 | `./start.sh --skip-tests` | Skips smoke tests, launches directly (for speed) |
+| 7 | `./start.sh --test-only` | Runs smoke tests only, does not launch app |
+
+**ST-7 → US Mapping:**
+
+| Smoke Test | Triggers Rework Of |
+|------------|-------------------|
+| ST-7.1–7.7 | US-022 |
+
+---
+
 ## 🧪 Smoke Test Checklist
 
 > Run these after setup to verify the app is working end-to-end. Each test should take < 2 minutes.
@@ -581,6 +653,7 @@ The ralph loop / coding agent should:
 | ST-5.4 (narration) | US-016 | Progress narration broken |
 | ST-6.1 (download ZIP) | US-014 | Export broken |
 | ST-6.2 (standalone HTML) | US-014 | Generated output broken |
+| ST-7.1–7.7 (start.sh) | US-022 | One-command setup broken |
 
 **Gate rule:** `typecheck` + `lint` + `build` (ST-1.2–1.4) must pass after EVERY US. If they break, fix immediately before moving on.
 
