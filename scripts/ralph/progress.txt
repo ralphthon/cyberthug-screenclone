@@ -26,6 +26,7 @@
 - For Cloney loop narration, centralize SSE-to-chat updates through one helper that both appends local chat bubbles and sends OpenWaifu `text-input` payloads with `sender: system`, emotion tags, and expression-index mapping.
 - For dual-theme retrofits, map Tailwind palette tokens (including `slate` shades) to CSS variables and set the initial `<html>` theme class in `index.html` before React mounts to avoid first-paint theme flash.
 - For backend runtime dependencies, fail fast during server startup with `fs.access(path, F_OK | X_OK)` checks and log an actionable setup command (`npm run setup`) when required scripts are missing.
+- For optional external services (like OpenWaifu WS), prefer non-fatal startup probes that log clear warnings and continue boot so local UI development is not blocked when that service is offline.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -481,4 +482,23 @@
 - **Learnings for future iterations:**
   - Keep setup scripts repo-root-aware (`cd` to script directory first) so they behave consistently from any invocation path, including containers and CI shells.
   - Syncing runtime skills from dependency source (`deps/ralph-image-analysis/skills/...`) into `scripts/ralph/skills/...` avoids silent drift between local runtime assets and dependency updates.
+---
+## 2026-02-28 18:27:34 UTC - US-021
+- Extended setup automation for OpenWaifu/Open-LLM-VTuber in `setup.sh`: added staged execution (`full`/`waifu`), non-interactive clone-if-missing behavior, configurable `OLV_PATH` (default `./deps/Open-LLM-VTuber`), OpenWaifu installer execution, and post-install artifact verification (`conf.yaml`, `model_dict.json`, `live2d-models/WaifuClaw`, `src/open_llm_vtuber/tts/qwen3_tts.py`).
+- Added `setup:waifu` script in `package.json` and updated `README.md` to document OpenWaifu setup flow, `DASHSCOPE_API_KEY`, `OPENWAIFU_WS_URL` default, and `OLV_PATH` behavior.
+- Added OpenWaifu WebSocket reachability checks at startup:
+  - Backend now performs a non-fatal TCP probe from `OPENWAIFU_WS_URL` (default `ws://localhost:12393/ws`) and logs warnings if unreachable/invalid.
+  - Frontend `CloneyPanel` now emits a one-time startup/reconnect warning in console when OLV endpoint is unreachable, while preserving existing reconnect behavior.
+- Verified `.gitignore` already includes `deps/OpenWaifu/` and `deps/Open-LLM-VTuber/` exclusions.
+- Files changed: `setup.sh`, `package.json`, `README.md`, `src/server/index.ts`, `src/client/src/components/CloneyPanel.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `bash -n setup.sh` passed
+- Image-analysis observation: Not applicable (dependency/setup + startup behavior story; no visual layout changes required).
+- **Learnings for future iterations:**
+  - For setup scripts that span optional stacks, stage-gated commands (`full` vs `waifu`) keep standard setup fast while still supporting targeted dependency bootstrap.
+  - For optional local service integrations, combine backend non-fatal startup probes with frontend one-time warnings to make connectivity issues explicit without blocking development flows.
 ---

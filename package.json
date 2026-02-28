@@ -5,6 +5,7 @@
   "description": "RalphTon ScreenClone app",
   "scripts": {
     "setup": "bash ./setup.sh",
+    "setup:waifu": "bash ./setup.sh waifu",
     "dev": "vite --config src/client/vite.config.ts",
     "server": "tsx watch src/server/index.ts",
     "dev:all": "concurrently -k \"npm run dev\" \"npm run server\"",

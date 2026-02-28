@@ -3,6 +3,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import JSZip from 'jszip';
 import multer, { type FileFilterCallback } from 'multer';
 import { constants as fsConstants, promises as fs } from 'node:fs';
+import { createConnection, type Socket } from 'node:net';
 import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { CompareError, compareScreenshots } from './compareService.js';
@@ -93,6 +94,8 @@ const ALLOWED_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const SSE_KEEPALIVE_MS = 15_000;
 const MAX_LOOP_EVENT_HISTORY = 200;
 const RALPH_RUNNER_PATH = path.resolve(process.cwd(), 'scripts', 'ralph', 'ralph.sh');
+const OPENWAIFU_DEFAULT_WS_URL = 'ws://localhost:12393/ws';
+const OPENWAIFU_PROBE_TIMEOUT_MS = 1_500;
 
 type LoopStartConfig = {
   projectName: string;
@@ -167,6 +170,11 @@ type IterationAutoEvaluationResult = {
   error: string | null;
 };
 
+type WsProbeEndpoint = {
+  host: string;
+  port: number;
+};
+
 const parseNumericValue = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -178,6 +186,82 @@ const parseNumericValue = (value: unknown): number | null => {
   }
 
   return null;
+};
+
+const parseWsProbeEndpoint = (rawUrl: string): WsProbeEndpoint | null => {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+      return null;
+    }
+
+    const host = parsed.hostname.trim();
+    if (host.length === 0) {
+      return null;
+    }
+
+    const fallbackPort = parsed.protocol === 'wss:' ? 443 : 80;
+    const port = parsed.port.length > 0 ? Number(parsed.port) : fallbackPort;
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      return null;
+    }
+
+    return { host, port };
+  } catch {
+    return null;
+  }
+};
+
+const probeTcpReachability = (host: string, port: number, timeoutMs: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    let settled = false;
+    let socket: Socket;
+
+    const finish = (reachable: boolean): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(reachable);
+    };
+
+    try {
+      socket = createConnection({ host, port });
+    } catch {
+      resolve(false);
+      return;
+    }
+
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => {
+      finish(true);
+    });
+    socket.once('timeout', () => {
+      finish(false);
+    });
+    socket.once('error', () => {
+      finish(false);
+    });
+  });
+
+const runOpenWaifuStartupProbe = async (): Promise<void> => {
+  const wsUrl = (process.env.OPENWAIFU_WS_URL ?? OPENWAIFU_DEFAULT_WS_URL).trim();
+  const endpoint = parseWsProbeEndpoint(wsUrl);
+
+  if (!endpoint) {
+    console.warn(`[startup] OPENWAIFU_WS_URL '${wsUrl}' is invalid. Expected ws:// or wss:// URL.`);
+    return;
+  }
+
+  const reachable = await probeTcpReachability(endpoint.host, endpoint.port, OPENWAIFU_PROBE_TIMEOUT_MS);
+  if (!reachable) {
+    console.warn(
+      `[startup] OpenWaifu WebSocket endpoint is unreachable at ${endpoint.host}:${endpoint.port} (${wsUrl}). Continuing startup.`,
+    );
+  }
 };
 
 const ensureRalphRunnerAvailable = async (): Promise<void> => {
@@ -1748,6 +1832,10 @@ const startServer = async (): Promise<void> => {
   await ensureRalphRunnerAvailable();
   server = app.listen(port, () => {
     console.log(`ScreenClone backend listening on http://localhost:${port}`);
+  });
+  void runOpenWaifuStartupProbe().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[startup] OpenWaifu WebSocket probe failed: ${message}`);
   });
 };
 

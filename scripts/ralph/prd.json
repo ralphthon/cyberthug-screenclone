@@ -490,9 +490,9 @@
         "package.json script 'setup:waifu' for standalone OpenWaifu setup",
         "Typecheck passes"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "OpenWaifu is ALREADY included at deps/OpenWaifu/ (no need to clone). setup.sh just needs to verify it exists, check install.sh is executable, and document DASHSCOPE_API_KEY. Open-LLM-VTuber still needs to be cloned separately if not present.",
-      "status": "pending"
+      "status": "passed"
     }
   ]
 }

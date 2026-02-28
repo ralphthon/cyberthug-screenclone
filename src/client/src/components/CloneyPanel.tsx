@@ -381,6 +381,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const celebrationResetTimerRef = useRef<number | null>(null);
   const celebrationExpressionTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
+  const startupWarningEmittedRef = useRef(false);
   const manualCloseRef = useRef(false);
   const collapsedRef = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -630,6 +631,19 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
     }
   }, []);
 
+  const warnOlvUnreachableOnce = useCallback(
+    (reason: string) => {
+      if (startupWarningEmittedRef.current) {
+        return;
+      }
+
+      startupWarningEmittedRef.current = true;
+      const targetUrl = parseString(appliedConfig.serverUrl) ?? OLV_DEFAULT_WS_URL;
+      console.warn(`[CloneyPanel] OLV WebSocket unreachable at ${targetUrl}. Retrying automatically. (${reason})`);
+    },
+    [appliedConfig.serverUrl],
+  );
+
   useEffect(() => {
     collapsedRef.current = isPanelCollapsed;
 
@@ -732,6 +746,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   useEffect(() => {
     manualCloseRef.current = false;
     reconnectAttemptRef.current = 0;
+    startupWarningEmittedRef.current = false;
     setConnectionStatus('connecting');
     setConnectionDetail('Connecting...');
 
@@ -748,9 +763,11 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       }
 
       let socket: WebSocket;
+      let hasOpened = false;
       try {
         socket = new WebSocket(nextUrl);
       } catch {
+        warnOlvUnreachableOnce('constructor failed');
         const delay = Math.min(
           OLV_RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttemptRef.current,
           OLV_RECONNECT_MAX_DELAY_MS,
@@ -770,7 +787,9 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       websocketRef.current = socket;
 
       socket.onopen = () => {
+        hasOpened = true;
         reconnectAttemptRef.current = 0;
+        startupWarningEmittedRef.current = false;
         setConnectionStatus('connected');
         setConnectionDetail('Connected');
 
@@ -794,6 +813,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       };
 
       socket.onerror = () => {
+        warnOlvUnreachableOnce('socket error');
         socket.close();
       };
 
@@ -806,6 +826,10 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
           setConnectionStatus('disconnected');
           setConnectionDetail('Disconnected');
           return;
+        }
+
+        if (!hasOpened) {
+          warnOlvUnreachableOnce('socket closed before open');
         }
 
         const delay = Math.min(
@@ -831,7 +855,13 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       setConnectionStatus('disconnected');
       setConnectionDetail('Disconnected');
     };
-  }, [appliedConfig.personaEnabled, appliedConfig.serverUrl, closeWebSocket, handleBridgePayload]);
+  }, [
+    appliedConfig.personaEnabled,
+    appliedConfig.serverUrl,
+    closeWebSocket,
+    handleBridgePayload,
+    warnOlvUnreachableOnce,
+  ]);
 
   const mapSessionIdToOpenWaifu = useCallback((sessionId: string | null) => {
     if (!sessionId) {

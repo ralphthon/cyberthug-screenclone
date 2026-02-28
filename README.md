@@ -72,10 +72,13 @@ npm install
 # We use LayoffLabs proxy — OpenAI-compatible API (same key for all providers)
 export OPENAI_API_KEY="your-layofflabs-api-key"      # Required
 export OPENAI_BASE_URL="https://api.layofflabs.com/v1"  # Required — LayoffLabs proxy
-export DASHSCOPE_API_KEY="your-dashscope-key"        # Optional (for Live2D TTS voice)
+export DASHSCOPE_API_KEY="your-dashscope-key"        # Optional (default: unset)
+export OPENWAIFU_WS_URL="ws://localhost:12393/ws"    # Optional (default shown)
 
 # 6. Verify everything
 npm run setup
+# Optional: run only OpenWaifu/Open-LLM-VTuber setup
+npm run setup:waifu
 
 # 7. Run smoke tests
 npm run test:smoke
@@ -146,8 +149,9 @@ Create a `.env` file in the project root or export directly:
 export OPENAI_API_KEY="your-layofflabs-api-key"
 export OPENAI_BASE_URL="https://api.layofflabs.com/v1"
 
-# Optional — for OpenWaifu Qwen3 TTS voice
-export DASHSCOPE_API_KEY="your-dashscope-key"
+# Optional — OpenWaifu runtime values
+export DASHSCOPE_API_KEY="your-dashscope-key"      # default: unset
+export OPENWAIFU_WS_URL="ws://localhost:12393/ws"  # default shown
 ```
 
 > **Note:** We use the LayoffLabs API proxy (`api.layofflabs.com`) instead of direct OpenAI. It's OpenAI-compatible so all SDKs work out of the box — just set `OPENAI_BASE_URL`.
@@ -164,6 +168,10 @@ export DASHSCOPE_API_KEY="your-dashscope-key"
 ```bash
 npm run setup
 # (equivalent: ./setup.sh)
+
+# Optional: waifu-only setup stage
+npm run setup:waifu
+# (equivalent: ./setup.sh waifu)
 ```
 
 This checks:
@@ -175,7 +183,8 @@ This checks:
 - ✅ ralph-image-analysis ready
 - ✅ `deps/ralph-image-analysis/ralph.sh` executable
 - ✅ `visual-verdict` skill synced into `scripts/ralph/skills/`
-- ✅ OpenWaifu ready
+- ✅ OpenWaifu/Open-LLM-VTuber cloned + installed
+- ✅ OpenWaifu post-install artifacts verified in OLV
 - ✅ Puppeteer system deps
 - ✅ Environment variables
 
@@ -240,9 +249,10 @@ This starts the ralph iterative loop:
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | **Yes** | LayoffLabs API key (OpenAI-compatible proxy for Vision + Codex) |
 | `OPENAI_BASE_URL` | **Yes** | `https://api.layofflabs.com/v1` — LayoffLabs proxy endpoint |
-| `DASHSCOPE_API_KEY` | Optional | Alibaba Cloud key for Qwen3 TTS (OpenWaifu voice) |
+| `DASHSCOPE_API_KEY` | Optional | Alibaba Cloud key for Qwen3 TTS (default: unset) |
 | `RALPH_MAX_SESSIONS` | Optional | Max concurrent ralph sessions (default: 3) |
 | `OPENWAIFU_WS_URL` | Optional | OpenWaifu WebSocket URL (default: `ws://localhost:12393/ws`) |
+| `OLV_PATH` | Optional | Open-LLM-VTuber install path used by setup (default: `./deps/Open-LLM-VTuber`) |
 
 ---
 
@@ -285,25 +295,24 @@ screenclone-clean/
 
 If you want Cloney (Live2D character with voice) running locally:
 
-### 1. Install Open-LLM-VTuber
+### 1. Run waifu setup stage
 
 ```bash
-git clone https://github.com/Open-LLM-VTuber/Open-LLM-VTuber.git deps/Open-LLM-VTuber
-cd deps/Open-LLM-VTuber
-uv sync
-cd ../..
+# Default OLV path: ./deps/Open-LLM-VTuber
+npm run setup:waifu
+
+# Optional: customize OLV path
+OLV_PATH=/abs/path/to/Open-LLM-VTuber npm run setup:waifu
 ```
 
-### 2. Install OpenWaifu pack
+What this does:
+- Clones `deps/OpenWaifu` if missing
+- Verifies `deps/OpenWaifu/install.sh` is executable
+- Clones Open-LLM-VTuber into `OLV_PATH` if missing
+- Runs `uv sync` when `uv` is available (warns with install instructions when missing)
+- Runs OpenWaifu installer and verifies required artifacts
 
-```bash
-cd deps/OpenWaifu
-chmod +x install.sh
-./install.sh ../Open-LLM-VTuber
-cd ../..
-```
-
-### 3. Configure LLM in conf.yaml
+### 2. Configure LLM in conf.yaml
 
 Edit `deps/Open-LLM-VTuber/conf.yaml`:
 
@@ -314,7 +323,7 @@ openai_compatible_llm:
   model: 'gpt-4o'                             # Model to use
 ```
 
-### 4. Set TTS API key and start
+### 3. Set TTS API key and start
 
 ```bash
 export DASHSCOPE_API_KEY="your-dashscope-key"
@@ -364,10 +373,10 @@ chmod +x deps/ralph-image-analysis/ralph.sh
 ### OpenWaifu WebSocket connection failed
 - Make sure OLV server is running (`uv run run_server.py`)
 - Check URL in OLV Settings panel matches server address
-- Default: `ws://localhost:12393/ws`
+- Default: `ws://localhost:12393/ws` (or set `OPENWAIFU_WS_URL`)
 
 ### TTS not working (no voice)
-- Set `DASHSCOPE_API_KEY` environment variable
+- Set `DASHSCOPE_API_KEY` environment variable (default is unset)
 - Get key from [Alibaba Cloud Model Studio](https://www.alibabacloud.com/product/model-studio)
 
 ### Low memory (Zenbook 16GB)
