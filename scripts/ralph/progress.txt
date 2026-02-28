@@ -11,6 +11,7 @@
 - For long-running backend workers, isolate orchestration in a manager class (spawn + ring buffer + fs.watch progress parsing) and always wire server `SIGTERM`/`SIGINT` to graceful child-process shutdown.
 - For backend provider errors, never return raw upstream error bodies to clients; sanitize to status-level summaries to avoid accidental credential leakage.
 - For multi-session Ralph orchestration, copy `scripts/ralph` into a per-session runtime (`/tmp/ralphton-{sessionId}/workspace/ralph-runtime`) so each process gets isolated `prd.json` and `progress.txt` files.
+- When API endpoints accept large JSON payloads, set an explicit `express.json({ limit })` and map `entity.too.large` errors to stable API codes instead of falling through to generic 500 responses.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -211,4 +212,25 @@
 - **Learnings for future iterations:**
   - Keep ralph runtime artifacts session-scoped (copied script + prompts + PRD/progress) to avoid cross-session state collisions when multiple loops run concurrently.
   - Parse progress deltas using byte offsets after `fs.watch` events to avoid duplicate reads and retain deterministic event emission.
+---
+## 2026-02-28 14:11:01 UTC - US-007
+- Implemented a new Puppeteer-based render module (`src/server/renderService.ts`) with lazy singleton browser startup, per-request page lifecycle, request interception to block external network URLs, `<base href="about:blank/">` injection, default viewport `1536x1024`, default `waitMs=1000`, and base64 PNG screenshot output metadata.
+- Added `POST /api/render` in the backend with request parsing for `{ html, width?, height?, waitMs? }`, 30-second timeout/error mapping (`RENDER_TIMEOUT` -> 504), and stable API errors for browser availability and oversized HTML payloads.
+- Updated server shutdown flow to close both active Ralph sessions and the shared Puppeteer browser instance.
+- Updated shared API contracts with `RenderRequest` and `RenderResponse` types.
+- Files changed: `src/server/renderService.ts`, `src/server/index.ts`, `src/shared/types/index.ts`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+  - Runtime probes passed:
+    - `POST /api/render` returns `413 HTML_TOO_LARGE` for payloads >1MB.
+    - `POST /api/render` returns `503 BROWSER_UNAVAILABLE` in environments without a Chromium binary (expected fallback behavior).
+- Image-analysis observation: Not applicable (backend render API story; no frontend UI layout change in this iteration).
+- **Learnings for future iterations:**
+  - Keep heavy browser automation in a dedicated service module with lazy singleton browser init and per-request page teardown to prevent memory growth.
+  - Body parser limits can mask endpoint-specific validation; use an explicit JSON limit and map parser overflow to domain-consistent API error codes.
+  - Render endpoint depends on a system browser path; set `PUPPETEER_EXECUTABLE_PATH` in deployment environments without standard Chromium locations.
 ---

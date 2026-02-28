@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { RalphProcessManager } from './ralphProcessManager.js';
+import { RenderError, closeRenderBrowser, renderHtmlToScreenshot } from './renderService.js';
 import { AnalysisError, analyzeSessionScreenshots } from './visionAnalyzer.js';
 
 type ApiErrorCode =
@@ -20,6 +21,10 @@ type ApiErrorCode =
   | 'ANALYSIS_TIMEOUT'
   | 'PROVIDER_UNAVAILABLE'
   | 'PROVIDER_FAILURE'
+  | 'HTML_TOO_LARGE'
+  | 'RENDER_TIMEOUT'
+  | 'RENDER_FAILED'
+  | 'BROWSER_UNAVAILABLE'
   | 'INTERNAL_ERROR';
 
 class ApiError extends Error {
@@ -169,7 +174,7 @@ app.use(
     origin: 'http://localhost:5173',
   }),
 );
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', version: '1.0.0' });
@@ -238,6 +243,30 @@ const parseImageIndex = (rawValue: unknown): number | undefined => {
   return parsedValue;
 };
 
+const parseOptionalInteger = (
+  rawValue: unknown,
+  field: 'width' | 'height' | 'waitMs',
+  min: number,
+  max: number,
+): number | undefined => {
+  if (rawValue === undefined || rawValue === null || rawValue === '') {
+    return undefined;
+  }
+
+  const parsedValue =
+    typeof rawValue === 'number'
+      ? rawValue
+      : typeof rawValue === 'string'
+        ? Number(rawValue)
+        : Number.NaN;
+
+  if (!Number.isInteger(parsedValue) || parsedValue < min || parsedValue > max) {
+    throw new ApiError(`${field} must be an integer between ${min} and ${max}`, 'INVALID_REQUEST', 400);
+  }
+
+  return parsedValue;
+};
+
 app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const sessionId =
@@ -267,6 +296,35 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
   }
 });
 
+app.post('/api/render', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const html = typeof req.body?.html === 'string' ? req.body.html : '';
+    if (!html.trim()) {
+      throw new ApiError('html is required', 'INVALID_REQUEST', 400);
+    }
+
+    const width = parseOptionalInteger(req.body?.width, 'width', 64, 4096);
+    const height = parseOptionalInteger(req.body?.height, 'height', 64, 4096);
+    const waitMs = parseOptionalInteger(req.body?.waitMs, 'waitMs', 0, 25_000);
+
+    const renderResult = await renderHtmlToScreenshot({
+      html,
+      width,
+      height,
+      waitMs,
+    });
+
+    res.status(200).json(renderResult);
+  } catch (error) {
+    if (error instanceof RenderError) {
+      next(new ApiError(error.message, error.code as ApiErrorCode, error.status, error.details));
+      return;
+    }
+
+    next(error);
+  }
+});
+
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof ApiError) {
     const payload: Record<string, unknown> = { error: err.message, code: err.code };
@@ -274,6 +332,12 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
       Object.assign(payload, err.details);
     }
     res.status(err.status).json(payload);
+    return;
+  }
+
+  const bodyParserError = err as { type?: string; status?: number; message?: string } | null;
+  if (bodyParserError?.type === 'entity.too.large' || bodyParserError?.status === 413) {
+    res.status(413).json({ error: 'html payload exceeds 1MB', code: 'HTML_TOO_LARGE' });
     return;
   }
 
@@ -292,7 +356,7 @@ const shutdown = (): void => {
 
   isShuttingDown = true;
   clearInterval(cleanupTimer);
-  void ralphProcessManager.shutdown().finally(() => {
+  void Promise.allSettled([ralphProcessManager.shutdown(), closeRenderBrowser()]).finally(() => {
     server.close(() => {
       process.exit(0);
     });

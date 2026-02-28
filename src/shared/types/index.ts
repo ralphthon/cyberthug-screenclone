@@ -30,3 +30,17 @@ export interface AnalyzeResponse {
   fonts: string[];
   responsiveHints: string[];
 }
+
+export interface RenderRequest {
+  html: string;
+  width?: number;
+  height?: number;
+  waitMs?: number;
+}
+
+export interface RenderResponse {
+  screenshot: string;
+  width: number;
+  height: number;
+  renderTimeMs: number;
+}

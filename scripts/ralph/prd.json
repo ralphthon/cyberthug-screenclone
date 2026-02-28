@@ -154,9 +154,9 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Use puppeteer-core + system Chromium or puppeteer with bundled Chromium. Singleton browser pattern: let browser = null; async function getBrowser() { if (!browser) browser = await puppeteer.launch(...); return browser; }",
-      "status": "pending"
+      "status": "passed"
     },
     {
       "id": "US-008",
