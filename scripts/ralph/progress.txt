@@ -7,6 +7,7 @@
 - For numeric settings inputs, keep React state as strings for controlled fields and validate/coerce at submit time before persistence.
 - For localStorage-backed forms, coerce parsed JSON through a typed sanitizer before hydrating state, and fall back to safe defaults for missing/invalid fields.
 - For server uploads, attach per-request session metadata to the Express request before Multer runs, and always clean up the session temp directory immediately on failed upload paths.
+- In TypeScript, Multer `diskStorage.destination` callbacks must still pass the second `destination` argument even on error paths to satisfy callback typing.
 - For long-running backend workers, isolate orchestration in a manager class (spawn + ring buffer + fs.watch progress parsing) and always wire server `SIGTERM`/`SIGINT` to graceful child-process shutdown.
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -146,4 +147,20 @@
 - **Learnings for future iterations:**
   - For persisted form state, coerce parsed localStorage payloads through a typed sanitizer before hydrating controlled inputs to avoid invalid stored shapes breaking form rendering.
   - Keep field-level errors in a keyed object and clear only the edited field on change for predictable inline validation UX.
+---
+## 2026-02-28 13:30:40 UTC - US-004
+- Implemented the Express multipart upload API for `POST /api/upload` with Multer disk storage, request-scoped UUID session directories (`/tmp/ralphton-{sessionId}`), `screenshots` field handling, and JSON response payload `{ sessionId, files[] }`.
+- Enforced upload validation and limits: MIME allowlist (`image/png`, `image/jpeg`, `image/webp`), max 10MB per file, max 5 files, and no-files rejection.
+- Added robust server behavior: 24-hour stale temp directory cleanup via `setInterval`, immediate cleanup of failed upload sessions, and consistent JSON error format `{ error, code }` through centralized error middleware.
+- Files changed: `src/server/index.ts`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - Runtime API probes passed (`/api/health`, successful upload, no-files 400, invalid-type 400, too-many-files 400)
+- Image-analysis observation: Not applicable (backend API story, no UI changes).
+- **Learnings for future iterations:**
+  - Use module augmentation on `express-serve-static-core` `Request` for request-scoped upload metadata used by Multer destination callbacks.
+  - Always remove partially-created upload session directories on failed validation paths to keep `/tmp/ralphton-*` clean between periodic cleanup sweeps.
 ---
