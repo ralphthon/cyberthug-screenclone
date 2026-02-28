@@ -44,3 +44,39 @@ export interface RenderResponse {
   height: number;
   renderTimeMs: number;
 }
+
+export type CompareMode = 'vision' | 'pixel' | 'both';
+
+export interface CompareRequest {
+  original: string;
+  generated: string;
+  mode?: CompareMode;
+  sessionId?: string;
+  iteration?: number;
+}
+
+export interface VisionCompareResult {
+  score: number;
+  layout_match: boolean;
+  color_match: boolean;
+  component_match: boolean;
+  text_match: boolean;
+  responsive_match: boolean;
+  differences: string[];
+  suggestions: string[];
+  verdict: 'pass' | 'close' | 'fail';
+  reasoning: string;
+}
+
+export interface PixelCompareResult {
+  pixelScore: number;
+  diffImage: string;
+  mismatchedPixels: number;
+  totalPixels: number;
+}
+
+export interface CompareResponse {
+  vision?: VisionCompareResult;
+  pixel?: PixelCompareResult;
+  primaryScore: number;
+}

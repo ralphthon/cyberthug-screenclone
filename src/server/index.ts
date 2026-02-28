@@ -4,6 +4,7 @@ import multer, { type FileFilterCallback } from 'multer';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
+import { CompareError, compareScreenshots } from './compareService.js';
 import { RalphProcessManager } from './ralphProcessManager.js';
 import { RenderError, closeRenderBrowser, renderHtmlToScreenshot } from './renderService.js';
 import { AnalysisError, analyzeSessionScreenshots } from './visionAnalyzer.js';
@@ -21,6 +22,10 @@ type ApiErrorCode =
   | 'ANALYSIS_TIMEOUT'
   | 'PROVIDER_UNAVAILABLE'
   | 'PROVIDER_FAILURE'
+  | 'INVALID_IMAGE_BASE64'
+  | 'COMPARE_FAILED'
+  | 'COMPARE_TIMEOUT'
+  | 'VISION_RATE_LIMITED'
   | 'HTML_TOO_LARGE'
   | 'RENDER_TIMEOUT'
   | 'RENDER_FAILED'
@@ -317,6 +322,47 @@ app.post('/api/render', async (req: Request, res: Response, next: NextFunction) 
     res.status(200).json(renderResult);
   } catch (error) {
     if (error instanceof RenderError) {
+      next(new ApiError(error.message, error.code as ApiErrorCode, error.status, error.details));
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/compare', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const iterationRaw = req.body?.iteration;
+    let iteration: number | undefined;
+    if (iterationRaw !== undefined && iterationRaw !== null && iterationRaw !== '') {
+      const parsedIteration =
+        typeof iterationRaw === 'number'
+          ? iterationRaw
+          : typeof iterationRaw === 'string'
+            ? Number(iterationRaw)
+            : Number.NaN;
+      if (!Number.isInteger(parsedIteration) || parsedIteration < 0) {
+        throw new ApiError('iteration must be a non-negative integer', 'INVALID_REQUEST', 400);
+      }
+      iteration = parsedIteration;
+    }
+
+    const sessionId =
+      typeof req.body?.sessionId === 'string' && req.body.sessionId.trim().length > 0
+        ? req.body.sessionId.trim()
+        : undefined;
+
+    const compareResult = await compareScreenshots({
+      original: typeof req.body?.original === 'string' ? req.body.original : '',
+      generated: typeof req.body?.generated === 'string' ? req.body.generated : '',
+      mode: req.body?.mode as 'vision' | 'pixel' | 'both' | undefined,
+      sessionId,
+      iteration,
+    });
+
+    res.status(200).json(compareResult);
+  } catch (error) {
+    if (error instanceof CompareError) {
       next(new ApiError(error.message, error.code as ApiErrorCode, error.status, error.details));
       return;
     }

@@ -12,6 +12,7 @@
 - For backend provider errors, never return raw upstream error bodies to clients; sanitize to status-level summaries to avoid accidental credential leakage.
 - For multi-session Ralph orchestration, copy `scripts/ralph` into a per-session runtime (`/tmp/ralphton-{sessionId}/workspace/ralph-runtime`) so each process gets isolated `prd.json` and `progress.txt` files.
 - When API endpoints accept large JSON payloads, set an explicit `express.json({ limit })` and map `entity.too.large` errors to stable API codes instead of falling through to generic 500 responses.
+- For visual compare endpoints, normalize both original/generated images to the same PNG dimensions before running vision and pixel diff so both scoring signals evaluate identical geometry.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -233,4 +234,24 @@
   - Keep heavy browser automation in a dedicated service module with lazy singleton browser init and per-request page teardown to prevent memory growth.
   - Body parser limits can mask endpoint-specific validation; use an explicit JSON limit and map parser overflow to domain-consistent API error codes.
   - Render endpoint depends on a system browser path; set `PUPPETEER_EXECUTABLE_PATH` in deployment environments without standard Chromium locations.
+---
+## 2026-02-28 14:24:00 UTC - US-008
+- Implemented dual visual comparison backend service (`compareService`) and new `POST /api/compare` route with modes `vision`, `pixel`, and `both` (default).
+- Added pixelmatch secondary scoring pipeline: base64 decode/validation, dimension normalization via sharp, pixel diff generation (`diffImage` base64 PNG), mismatch totals, and computed `pixelScore`.
+- Added vision-primary verdict pipeline with provider fallback (OpenAI -> Anthropic), 60s timeout, strict schema coercion, session-level 5s rate limiting, and per `(sessionId, iteration)` verdict cache.
+- Implemented pixel-only fallback behavior when vision provider calls fail, with `primaryScore` switching to pixel score.
+- Added progress feedback injection to per-session runtime logs when `sessionId` + `iteration` are supplied, appending `Visual Verdict` differences/suggestions blocks to `progress.txt`.
+- Extended shared API contracts with compare request/response and vision/pixel result types.
+- Files changed: `src/server/compareService.ts`, `src/server/index.ts`, `src/shared/types/index.ts`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+  - Runtime service probe passed via `npx tsx` (`both` mode pixel fallback without provider keys, `pixel` mode scoring, invalid base64 -> `INVALID_IMAGE_BASE64` 400)
+- Image-analysis observation: Not applicable (backend comparison API story, no frontend UI layout change in this iteration).
+- **Learnings for future iterations:**
+  - Keep vision verdict evaluation and pixel diff evaluation on the same normalized image dimensions, otherwise combined scoring can drift.
+  - For provider-backed comparison endpoints, enforce per-session rate limiting before outbound calls and cache by `(sessionId, iteration)` to avoid duplicate expensive verdict requests.
 ---
