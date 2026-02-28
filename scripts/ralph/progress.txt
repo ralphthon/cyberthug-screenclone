@@ -11,6 +11,7 @@
 - For long-running backend workers, isolate orchestration in a manager class (spawn + ring buffer + fs.watch progress parsing) and always wire server `SIGTERM`/`SIGINT` to graceful child-process shutdown.
 - For backend provider errors, never return raw upstream error bodies to clients; sanitize to status-level summaries to avoid accidental credential leakage.
 - For multi-session Ralph orchestration, copy `scripts/ralph` into a per-session runtime (`/tmp/ralphton-{sessionId}/workspace/ralph-runtime`) so each process gets isolated `prd.json` and `progress.txt` files.
+- For loop-owned evaluation feedback, tag orchestrator-written `progress.txt` entries (e.g., `[AUTO_EVAL]`) and ignore those tags in process-log parsers to avoid recursive `iteration-complete` event loops.
 - When API endpoints accept large JSON payloads, set an explicit `express.json({ limit })` and map `entity.too.large` errors to stable API codes instead of falling through to generic 500 responses.
 - For visual compare endpoints, normalize both original/generated images to the same PNG dimensions before running vision and pixel diff so both scoring signals evaluate identical geometry.
 - For SSE-backed loop sessions, keep a bounded per-session event buffer and replay it on connect so reconnecting clients recover missed timeline events.
@@ -406,4 +407,22 @@
 - **Learnings for future iterations:**
   - For conversational command bridges, keep the loop SSE event object in app-level state and pass it down as a typed prop so chat-side narration can react without duplicating transport logic.
   - Clipboard image ingestion in chat should route through the same upload validator used by drop/browse flows to keep MIME/size/slot constraints consistent.
+---
+## 2026-02-28 17:22:40 UTC - US-017
+- Implemented backend auto-evaluation wiring for each Ralph iteration: the loop now extracts generated HTML from session workspace outputs, renders it with the Puppeteer render service, compares it to the uploaded original screenshot, and uses that evaluated score as the primary iteration score for SSE/status/history.
+- Added loop-safe feedback injection to runtime `progress.txt` with `[AUTO_EVAL]` entries that include primary score, vision differences/suggestions when available, pixel mismatch summary, and explicit render/compare error logging so failed renders do not stop the loop.
+- Added per-session iteration processing safeguards in loop state (`iterationEventQueue`, `autoEvaluatedIterations`, `autoEvaluationScores`) to ensure one auto-evaluation per iteration and stable deduped event emission/commit behavior.
+- Persisted evaluated iteration artifacts to session workspace (`latest.png`, `generated.png`, `diff.png`, and iteration-specific images) so timeline and compare UI consumers can load generated/diff previews consistently.
+- Added parser protection in `RalphProcessManager` to ignore `[AUTO_EVAL]` chunks while tailing `progress.txt`, preventing orchestrator-written feedback from recursively triggering new `iteration-complete` events.
+- Files changed: `src/server/index.ts`, `src/server/ralphProcessManager.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed (warnings only: Vite CJS deprecation + client chunk size advisory)
+- Image-analysis observation: Not applicable (backend orchestration story, no direct UI layout changes in this iteration).
+- **Learnings for future iterations:**
+  - When loop scoring is derived outside the child process, serialize iteration-complete handling per session so async render/compare work cannot race duplicate process events.
+  - Persisting iteration screenshots/diff outputs immediately after evaluation keeps SSE payloads, compare views, and ZIP exports aligned to the same generated artifacts.
 ---

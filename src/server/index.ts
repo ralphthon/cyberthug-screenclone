@@ -138,6 +138,9 @@ type LoopSessionRecord = {
   github: LoopGitHubConfig | null;
   events: LoopEventEnvelope[];
   subscribers: Set<Response>;
+  autoEvaluatedIterations: Set<number>;
+  autoEvaluationScores: Map<number, number>;
+  iterationEventQueue: Promise<void>;
 };
 
 const loopSessions = new Map<string, LoopSessionRecord>();
@@ -153,6 +156,14 @@ type RankedIterationScreenshot = {
   iteration: number;
   score: number;
   base64: string;
+};
+
+type IterationAutoEvaluationResult = {
+  primaryScore: number | null;
+  screenshotBase64: string | null;
+  diffImageBase64: string | null;
+  mode: 'vision+pixel' | 'pixel-only' | 'error';
+  error: string | null;
 };
 
 const parseNumericValue = (value: unknown): number | null => {
@@ -725,6 +736,9 @@ const createLoopSessionRecord = (
     github,
     events: [],
     subscribers: new Set<Response>(),
+    autoEvaluatedIterations: new Set<number>(),
+    autoEvaluationScores: new Map<number, number>(),
+    iterationEventQueue: Promise.resolve(),
   };
 };
 
@@ -766,7 +780,11 @@ const publishLoopEvent = (sessionId: string, event: LoopEventName, data: Record<
 
 const getLoopCodePreview = async (sessionId: string): Promise<string> => {
   const workspaceDir = path.join(TMP_ROOT, `${SESSION_DIR_PREFIX}${sessionId}`, 'workspace');
-  const candidatePaths = [path.join(workspaceDir, 'index.html'), path.join(workspaceDir, 'generated', 'index.html')];
+  const candidatePaths = [
+    path.join(workspaceDir, 'index.html'),
+    path.join(workspaceDir, 'generated', 'index.html'),
+    path.join(workspaceDir, 'output', 'index.html'),
+  ];
 
   for (const candidatePath of candidatePaths) {
     try {
@@ -813,6 +831,231 @@ const getLoopImageArtifact = async (sessionId: string, candidateFilenames: strin
   }
 
   return null;
+};
+
+const getSessionWorkspaceDir = (sessionId: string): string =>
+  path.join(TMP_ROOT, `${SESSION_DIR_PREFIX}${sessionId}`, 'workspace');
+
+const getSessionRuntimeProgressPath = (sessionId: string): string =>
+  path.join(getSessionWorkspaceDir(sessionId), 'ralph-runtime', 'progress.txt');
+
+const getLoopGeneratedHtml = async (sessionId: string): Promise<string | null> => {
+  const workspaceDir = getSessionWorkspaceDir(sessionId);
+  const candidatePaths = [
+    path.join(workspaceDir, 'index.html'),
+    path.join(workspaceDir, 'generated', 'index.html'),
+    path.join(workspaceDir, 'output', 'index.html'),
+  ];
+
+  for (const candidatePath of candidatePaths) {
+    try {
+      const html = await fs.readFile(candidatePath, 'utf8');
+      if (html.trim().length > 0) {
+        return html;
+      }
+    } catch {
+      // Continue searching candidate output files.
+    }
+  }
+
+  return null;
+};
+
+const getPrimaryOriginalScreenshotBase64 = async (sessionId: string): Promise<string | null> => {
+  const originals = await collectOriginalUploadAssets(sessionId);
+  const first = originals[0];
+  if (!first) {
+    return null;
+  }
+
+  return first.buffer.toString('base64');
+};
+
+const saveIterationImageArtifacts = async (params: {
+  sessionId: string;
+  iteration: number;
+  generatedScreenshotBase64: string;
+  diffImageBase64: string | null;
+}): Promise<void> => {
+  const workspaceDir = getSessionWorkspaceDir(params.sessionId);
+  const iterationsDir = path.join(workspaceDir, 'iterations');
+
+  const generatedBuffer = Buffer.from(params.generatedScreenshotBase64, 'base64');
+  if (generatedBuffer.length === 0) {
+    return;
+  }
+
+  const iterationToken = String(params.iteration).padStart(3, '0');
+  const writes: Promise<void>[] = [
+    fs.writeFile(path.join(workspaceDir, 'latest.png'), generatedBuffer),
+    fs.writeFile(path.join(workspaceDir, 'generated.png'), generatedBuffer),
+    fs.writeFile(path.join(iterationsDir, `iteration-${iterationToken}-generated.png`), generatedBuffer),
+  ];
+
+  if (params.diffImageBase64) {
+    const diffBuffer = Buffer.from(params.diffImageBase64, 'base64');
+    if (diffBuffer.length > 0) {
+      writes.push(
+        fs.writeFile(path.join(workspaceDir, 'diff.png'), diffBuffer),
+        fs.writeFile(path.join(workspaceDir, 'pixel-diff.png'), diffBuffer),
+        fs.writeFile(path.join(iterationsDir, `iteration-${iterationToken}-diff.png`), diffBuffer),
+      );
+    }
+  }
+
+  try {
+    await fs.mkdir(iterationsDir, { recursive: true });
+    await Promise.all(writes);
+  } catch {
+    // Artifact writes should never fail the loop.
+  }
+};
+
+const appendAutoEvalProgressEntry = async (params: {
+  sessionId: string;
+  iteration: number;
+  result: IterationAutoEvaluationResult;
+  compareResult?: Awaited<ReturnType<typeof compareScreenshots>>;
+}): Promise<void> => {
+  const progressPath = getSessionRuntimeProgressPath(params.sessionId);
+  const lines: string[] = ['', `## [AUTO_EVAL] Iteration ${params.iteration}`];
+
+  if (params.result.error) {
+    lines.push('Status: error', `Error: ${params.result.error}`);
+  } else {
+    lines.push(`Status: ${params.result.mode}`);
+    if (params.result.primaryScore !== null) {
+      lines.push(`Primary score: ${params.result.primaryScore.toFixed(2)}/100`);
+    }
+
+    if (params.compareResult?.vision) {
+      const vision = params.compareResult.vision;
+      lines.push(`Vision verdict: ${vision.verdict} (${vision.score.toFixed(2)}/100)`, 'Differences:');
+      if (vision.differences.length === 0) {
+        lines.push('- None reported');
+      } else {
+        lines.push(...vision.differences.map((item) => `- ${item}`));
+      }
+
+      lines.push('Suggestions:');
+      if (vision.suggestions.length === 0) {
+        lines.push('- None reported');
+      } else {
+        lines.push(...vision.suggestions.map((item) => `- ${item}`));
+      }
+    }
+
+    if (params.compareResult?.pixel) {
+      const pixel = params.compareResult.pixel;
+      lines.push(
+        `Pixel score: ${pixel.pixelScore.toFixed(2)}/100 (${pixel.mismatchedPixels}/${pixel.totalPixels} mismatched)`,
+      );
+    }
+  }
+
+  lines.push('---', '');
+
+  try {
+    await fs.appendFile(progressPath, `${lines.join('\n')}\n`, 'utf8');
+  } catch {
+    // Progress logging should not fail loop orchestration.
+  }
+};
+
+const describeError = (error: unknown): string => (error instanceof Error ? error.message : 'Unknown error');
+
+const autoEvaluateIteration = async (
+  sessionId: string,
+  iteration: number,
+): Promise<IterationAutoEvaluationResult> => {
+  const generatedHtml = await getLoopGeneratedHtml(sessionId);
+  if (!generatedHtml) {
+    const result: IterationAutoEvaluationResult = {
+      primaryScore: null,
+      screenshotBase64: null,
+      diffImageBase64: null,
+      mode: 'error',
+      error: 'Generated HTML was not found in workspace output paths.',
+    };
+    await appendAutoEvalProgressEntry({ sessionId, iteration, result });
+    return result;
+  }
+
+  let renderedScreenshotBase64: string;
+  try {
+    const renderResult = await renderHtmlToScreenshot({ html: generatedHtml });
+    renderedScreenshotBase64 = renderResult.screenshot;
+  } catch (error) {
+    const result: IterationAutoEvaluationResult = {
+      primaryScore: null,
+      screenshotBase64: null,
+      diffImageBase64: null,
+      mode: 'error',
+      error: `Render failed: ${describeError(error)}`,
+    };
+    await appendAutoEvalProgressEntry({ sessionId, iteration, result });
+    return result;
+  }
+
+  const originalBase64 = await getPrimaryOriginalScreenshotBase64(sessionId);
+  if (!originalBase64) {
+    const result: IterationAutoEvaluationResult = {
+      primaryScore: null,
+      screenshotBase64: renderedScreenshotBase64,
+      diffImageBase64: null,
+      mode: 'error',
+      error: 'Original screenshot could not be loaded for comparison.',
+    };
+    await saveIterationImageArtifacts({
+      sessionId,
+      iteration,
+      generatedScreenshotBase64: renderedScreenshotBase64,
+      diffImageBase64: null,
+    });
+    await appendAutoEvalProgressEntry({ sessionId, iteration, result });
+    return result;
+  }
+
+  try {
+    const compareResult = await compareScreenshots({
+      original: originalBase64,
+      generated: renderedScreenshotBase64,
+      mode: 'both',
+    });
+    const result: IterationAutoEvaluationResult = {
+      primaryScore: compareResult.primaryScore,
+      screenshotBase64: renderedScreenshotBase64,
+      diffImageBase64: compareResult.pixel?.diffImage ?? null,
+      mode: compareResult.vision ? 'vision+pixel' : 'pixel-only',
+      error: null,
+    };
+
+    await saveIterationImageArtifacts({
+      sessionId,
+      iteration,
+      generatedScreenshotBase64: renderedScreenshotBase64,
+      diffImageBase64: result.diffImageBase64,
+    });
+    await appendAutoEvalProgressEntry({ sessionId, iteration, result, compareResult });
+
+    return result;
+  } catch (error) {
+    const result: IterationAutoEvaluationResult = {
+      primaryScore: null,
+      screenshotBase64: renderedScreenshotBase64,
+      diffImageBase64: null,
+      mode: 'error',
+      error: `Compare failed: ${describeError(error)}`,
+    };
+    await saveIterationImageArtifacts({
+      sessionId,
+      iteration,
+      generatedScreenshotBase64: renderedScreenshotBase64,
+      diffImageBase64: null,
+    });
+    await appendAutoEvalProgressEntry({ sessionId, iteration, result });
+    return result;
+  }
 };
 
 const enqueueGitHubTask = async <T>(session: LoopSessionRecord, task: () => Promise<T>): Promise<T> => {
@@ -994,73 +1237,89 @@ ralphProcessManager.on('iteration-start', (payload: ManagerIterationStartEvent) 
 });
 
 ralphProcessManager.on('iteration-complete', (payload: ManagerIterationCompleteEvent) => {
-  void (async () => {
-    const session = loopSessions.get(payload.sessionId);
-    if (!session) {
-      return;
-    }
+  const session = loopSessions.get(payload.sessionId);
+  if (!session) {
+    return;
+  }
 
-    const status = getRalphStatusOrNull(payload.sessionId);
-    const score = payload.score ?? status?.lastScore ?? null;
-    const iteration = Math.max(payload.iteration, status?.currentIteration ?? 0);
-    const dedupeKey = `${iteration}:${score ?? 'null'}`;
-    if (session.lastIterationEventKey === dedupeKey) {
-      return;
-    }
+  session.iterationEventQueue = session.iterationEventQueue
+    .then(async () => {
+      const status = getRalphStatusOrNull(payload.sessionId);
+      const iteration = Math.max(payload.iteration, status?.currentIteration ?? 0);
 
-    session.lastIterationEventKey = dedupeKey;
-
-    const previousScore = session.lastIterationScore;
-    const improvement = previousScore !== null && score !== null ? Number((score - previousScore).toFixed(2)) : null;
-    const previousBestScore = session.bestScore;
-    const isBestImprovement = score !== null && (previousBestScore === null || score > previousBestScore);
-    session.lastIterationScore = score;
-
-    if (score !== null && (session.bestScore === null || score > session.bestScore)) {
-      session.bestScore = score;
-      session.bestIteration = iteration;
-    }
-
-    const iterationHistoryEntry: LoopIterationHistoryEntry = {
-      iteration,
-      score,
-      improvement,
-      commitUrl: null,
-    };
-    session.iterationHistory.push(iterationHistoryEntry);
-
-    let commitUrl: string | null = null;
-    if (score !== null && isBestImprovement && session.github) {
-      const deltaFromBest = previousBestScore === null ? score : score - previousBestScore;
-      try {
-        commitUrl = await commitImprovingIteration(session, iteration, score, deltaFromBest);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'unknown GitHub commit failure';
-        console.warn(`[github] iteration commit failed for session ${payload.sessionId}: ${message}`);
+      let autoEvaluationResult: IterationAutoEvaluationResult | null = null;
+      if (!session.autoEvaluatedIterations.has(iteration)) {
+        session.autoEvaluatedIterations.add(iteration);
+        autoEvaluationResult = await autoEvaluateIteration(payload.sessionId, iteration);
+        if (autoEvaluationResult.primaryScore !== null) {
+          session.autoEvaluationScores.set(iteration, autoEvaluationResult.primaryScore);
+        }
       }
-    }
 
-    const [codePreview, screenshotBase64, diffImageBase64] = await Promise.all([
-      getLoopCodePreview(payload.sessionId),
-      getLoopImageArtifact(payload.sessionId, ['latest.png', 'generated.png', 'screenshot.png', 'clone.png']),
-      getLoopImageArtifact(payload.sessionId, ['diff.png', 'pixel-diff.png', 'overlay.png']),
-    ]);
+      const knownScore = session.autoEvaluationScores.get(iteration) ?? null;
+      const score = knownScore ?? autoEvaluationResult?.primaryScore ?? payload.score ?? status?.lastScore ?? null;
+      const dedupeKey = `${iteration}:${score ?? 'null'}`;
+      if (session.lastIterationEventKey === dedupeKey) {
+        return;
+      }
+      session.lastIterationEventKey = dedupeKey;
 
-    iterationHistoryEntry.commitUrl = commitUrl;
+      const previousScore = session.lastIterationScore;
+      const improvement = previousScore !== null && score !== null ? Number((score - previousScore).toFixed(2)) : null;
+      const previousBestScore = session.bestScore;
+      const isBestImprovement = score !== null && (previousBestScore === null || score > previousBestScore);
+      session.lastIterationScore = score;
 
-    publishLoopEvent(payload.sessionId, 'iteration-complete', {
-      iteration,
-      maxIterations: status?.maxIterations ?? session.config.maxIterations,
-      score,
-      previousScore,
-      improvement,
-      screenshotBase64,
-      codePreview,
-      diffImageBase64,
-      commitUrl,
-      elapsedMs: status?.elapsedMs ?? Date.now() - session.startedAtMs,
+      if (score !== null && (session.bestScore === null || score > session.bestScore)) {
+        session.bestScore = score;
+        session.bestIteration = iteration;
+      }
+
+      const iterationHistoryEntry: LoopIterationHistoryEntry = {
+        iteration,
+        score,
+        improvement,
+        commitUrl: null,
+      };
+      session.iterationHistory.push(iterationHistoryEntry);
+
+      let commitUrl: string | null = null;
+      if (score !== null && isBestImprovement && session.github) {
+        const deltaFromBest = previousBestScore === null ? score : score - previousBestScore;
+        try {
+          commitUrl = await commitImprovingIteration(session, iteration, score, deltaFromBest);
+        } catch (error) {
+          const message = describeError(error);
+          console.warn(`[github] iteration commit failed for session ${payload.sessionId}: ${message}`);
+        }
+      }
+
+      const [codePreview, fallbackScreenshotBase64, fallbackDiffImageBase64] = await Promise.all([
+        getLoopCodePreview(payload.sessionId),
+        getLoopImageArtifact(payload.sessionId, ['latest.png', 'generated.png', 'screenshot.png', 'clone.png']),
+        getLoopImageArtifact(payload.sessionId, ['diff.png', 'pixel-diff.png', 'overlay.png']),
+      ]);
+
+      const screenshotBase64 = autoEvaluationResult?.screenshotBase64 ?? fallbackScreenshotBase64;
+      const diffImageBase64 = autoEvaluationResult?.diffImageBase64 ?? fallbackDiffImageBase64;
+      iterationHistoryEntry.commitUrl = commitUrl;
+
+      publishLoopEvent(payload.sessionId, 'iteration-complete', {
+        iteration,
+        maxIterations: status?.maxIterations ?? session.config.maxIterations,
+        score,
+        previousScore,
+        improvement,
+        screenshotBase64,
+        codePreview,
+        diffImageBase64,
+        commitUrl,
+        elapsedMs: status?.elapsedMs ?? Date.now() - session.startedAtMs,
+      });
+    })
+    .catch((error: unknown) => {
+      console.warn(`[loop] iteration handler failed for session ${payload.sessionId}: ${describeError(error)}`);
     });
-  })();
 });
 
 ralphProcessManager.on('loop-complete', (payload: ManagerLoopCompleteEvent) => {

@@ -396,9 +396,9 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
+      "passes": true,
       "notes": "Key insight: ralph.sh manages its own iteration loop. Our backend wraps it with: (1) prd.json generation, (2) render+compare after each iteration, (3) SSE event emission. The feedback loop is: ralph generates code → we render+screenshot → we compare → we update progress.txt with score → ralph reads score on next iteration.",
-      "status": "pending"
+      "status": "passed"
     },
     {
       "id": "US-018",

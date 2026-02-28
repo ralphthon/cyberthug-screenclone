@@ -427,6 +427,10 @@ export class RalphProcessManager extends EventEmitter {
   }
 
   private parseProgressChunk(runtime: SessionRuntime, chunk: string): void {
+    if (chunk.includes('[AUTO_EVAL]')) {
+      return;
+    }
+
     const iteration = this.parseIterationFromChunk(chunk) ?? runtime.currentIteration;
     const score = this.parseScoreFromChunk(chunk);
 
