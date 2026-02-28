@@ -4,6 +4,13 @@ Clone any website from a screenshot using AI-powered iterative refinement with a
 
 ---
 
+## Contributors
+
+- 벨만
+- 도윤
+
+---
+
 ## ⚡ TL;DR — One Command Setup
 
 > **Just run this.** It handles everything — dependencies, environment, tests, and launch.
