@@ -1,8 +1,0 @@
-{
-  "repoPath": "/home/bellman/Workspace/screenclone-clean",
-  "repoUrl": "",
-  "tmuxSession": "ralph-screenclone",
-  "prdPath": "scripts/ralph/prd.json",
-  "progressPath": "scripts/ralph/progress.txt",
-  "branch": "main"
-}

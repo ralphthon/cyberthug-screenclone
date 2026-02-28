@@ -169,6 +169,21 @@ This checks:
 - ✅ Puppeteer system deps
 - ✅ Environment variables
 
+### Step 6.5: Run loop runtime gate (required before Step 2+ backend loop work)
+
+```bash
+bash scripts/manual/loop-runtime-gate.sh
+```
+
+The runtime gate blocks progress until core preconditions are green:
+- Node/npm versions
+- writable `/tmp`
+- required project paths/dependencies
+- `OPENAI_API_KEY` configured (non-placeholder)
+- `omx` CLI available for `--tool omx`
+
+If it fails, fix the listed items and re-run the same command.
+
 ### Step 7: Run the app (development mode)
 
 ```bash

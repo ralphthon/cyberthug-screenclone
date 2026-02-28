@@ -1,8 +1,10 @@
 ## Codebase Patterns
 - Use ESLint v9 flat config in `eslint.config.js`; `.eslintrc.*` is ignored.
 - Keep client and server TypeScript configs separate (`src/client/tsconfig.json` and `src/server/tsconfig.json`) and validate both in `npm run typecheck`.
+- For image previews, keep canonical upload state as `File[]` and always revoke `URL.createObjectURL(...)` values in cleanup.
 - For numeric settings inputs, keep React state as strings for controlled fields and validate/coerce at submit time before persistence.
 - For server uploads, attach per-request session metadata to the Express request before Multer runs, and always clean up the session temp directory immediately on failed upload paths.
+- For long-running backend workers, isolate orchestration in a manager class (spawn + ring buffer + fs.watch progress parsing) and always wire server `SIGTERM`/`SIGINT` to graceful child-process shutdown.
 
 ## 2026-02-28 07:26:01 UTC - US-001
 - Implemented initial ScreenClone scaffold with Vite + React + TypeScript + Tailwind frontend, Express backend, shared types, and root tooling/scripts.
@@ -17,11 +19,27 @@
 - **Learnings for future iterations:**
   - ESLint v9 in this repo requires flat config (`eslint.config.js`).
   - Port expectations are fixed by US-001: frontend `5173`, backend `3001`.
-  - `timeout 20s` startup probes are a fast way to verify long-running dev scripts without hanging the iteration.
+- `timeout 20s` startup probes are a fast way to verify long-running dev scripts without hanging the iteration.
+---
+
+## 2026-02-28 07:31:53 UTC - US-002
+- Implemented a drag-and-drop screenshot uploader on the main page with click-to-browse fallback, drag highlight behavior, file type/size validation, max 5 upload limit enforcement, and toast-style error messages.
+- Added thumbnail preview grid (5 slots) with remove actions and placeholder boxes; previews preserve aspect ratio and removal correctly updates the upload counter and re-enables uploads.
+- Prepared `FormData` payload from in-memory `File[]` state for future API upload integration.
+- Files changed: `src/client/src/App.tsx`, `src/client/src/index.css`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed
+- Image-analysis observation (UI story): No browser automation tool is configured in this harness, so reference mockup comparison against `/designs/mockups/us002.png` is pending manual verification.
+- **Learnings for future iterations:**
+  - Keep upload constraints centralized (`MAX_FILES`, allowed MIME set, max bytes) so both drop and browse paths share identical validation.
+  - Generate preview object URLs from current files and revoke them on dependency cleanup to avoid memory leaks.
+  - The drop zone should stay keyboard-accessible (`role=\"button\"`, Enter/Space handlers) even when it is primarily pointer-driven.
 ---
 
 ## 2026-02-28 07:42:23 UTC - US-003
-- Implemented the clone session settings form under the upload UI: project name, GitHub URL, GitHub token with show/hide toggle, max iterations, and target similarity.
+- Implemented the clone session settings form under the upload UI: project name, GitHub URL, GitHub token with show/hide icon toggle, max iterations, and target similarity.
 - Added inline validation messages (required project name, URL format, iteration minimum, similarity range), disabled start conditions (requires project name + at least one uploaded image), and clone-running disabled form opacity state.
 - Wired localStorage persistence for clone settings on submit and hydration on mount using key `ralphton-config`.
 - Files changed: `src/client/src/App.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
@@ -29,7 +47,7 @@
   - `mcp lsp_diagnostics_directory` passed (0 errors)
   - `npm run lint` passed
   - `npm run typecheck` passed
-  - `npm test` passed (`No tests yet`)
+  - `npm test` passed (`No tests yet` placeholder script)
 - Image-analysis observation (UI story): Browser automation is not configured in this harness, so comparison against `/designs/mockups/us003.png` could not be executed; manual visual verification is required.
 - **Learnings for future iterations:**
   - Keep clone settings persistence shape aligned with controlled input state (`string` values) to avoid uncontrolled/number parsing issues.
@@ -51,5 +69,24 @@
 - **Learnings for future iterations:**
   - For upload endpoints in this repo, initialize and stash request-scoped session metadata (`uploadSessionId`, `uploadSessionDir`) on `express-serve-static-core` request augmentation before invoking Multer storage callbacks.
   - Multer MIME filtering alone is insufficient for trust boundaries; add post-write magic-byte validation for allowed image formats and fail fast with cleanup.
-  - On upload errors after directory creation, always remove the session directory immediately to avoid stale artifact buildup between interval cleanup runs.
+- On upload errors after directory creation, always remove the session directory immediately to avoid stale artifact buildup between interval cleanup runs.
+---
+
+## 2026-02-28 08:40:40 UTC - US-006
+- Implemented `RalphProcessManager` for per-session ralph loop orchestration with required APIs: `start(sessionId, config)`, `stop(sessionId)`, `getStatus(sessionId)`, and `getOutput(sessionId, lastN)`.
+- Added session runtime preparation that generates per-session `prd.json`, seeds `progress.txt`, copies ralph runtime assets, and spawns `ralph.sh --tool omx --images-dir <session-images-dir> <maxIterations>` in an isolated workspace.
+- Added child-process stdout/stderr capture with a 500-line ring buffer, stdout iteration parsing (`Ralph Iteration N of M`), completion detection via `<promise>COMPLETE</promise>`, and progress-tail parsing via `fs.watch` + byte-safe incremental reads to emit `iteration-complete` events.
+- Enforced session lifecycle state progression (`idle -> uploading -> analyzing -> cloning -> completed|failed`) with state-change events and a max concurrent session limit controlled by `RALPH_MAX_SESSIONS` (default 3).
+- Wired backend graceful shutdown in `src/server/index.ts` so `SIGTERM`/`SIGINT` triggers manager shutdown and sends `SIGTERM` to all active child processes before server exit.
+- Files changed: `src/server/ralphProcessManager.ts`, `src/server/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+- Image-analysis observation: Not applicable (backend orchestration story, no UI changes).
+- **Learnings for future iterations:**
+  - Keep progress tail offsets in bytes (`Buffer` slicing) instead of UTF-8 string indices to avoid multibyte truncation bugs.
+  - Emit loop completion/failure events idempotently so stop + exit handlers do not double-publish terminal session events.
+  - Treat runtime artifacts (`ralph.sh`, prompts, skills, per-session PRD/progress) as a copied per-session workspace to keep parallel clone sessions isolated.
 ---

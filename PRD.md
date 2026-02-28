@@ -662,6 +662,48 @@ The ralph loop / coding agent should:
 
 **Gate rule:** `typecheck` + `lint` + `build` (ST-1.2–1.4) must pass after EVERY US. If they break, fix immediately before moving on.
 
+**Runtime gate rule:** After EVERY US (not just UI ones), the coding agent MUST:
+1. Start the dev server (`npm run dev:all`)
+2. Open `http://localhost:5173` in a headless browser (Playwright)
+3. Check for **zero** `pageerror` events (uncaught exceptions)
+4. Check for **zero** `console.error` messages (except expected ones like OLV WebSocket when OLV server is not running)
+5. Verify `#root` innerHTML length > 0 (React actually rendered, not blank page)
+6. Take a screenshot and compare visually — UI should not be blank/broken
+7. If any check fails → treat as US failure, fix before proceeding
+
+This prevents "builds fine but crashes at runtime" situations where TypeScript compiles but imports are broken, props are wrong, or React fails to mount.
+
+### 🚨 Lessons Learned (Post-Mortem Rules)
+
+These rules come from actual bugs encountered during development. **Do not remove them.**
+
+**1. Smoke test ≠ lint/build. Smoke test = E2E.**
+- `typecheck`, `lint`, `build` are CI basics, NOT smoke tests
+- A real smoke test opens the app in a browser and verifies the user flow works
+- Smoke tests MUST include: page loads → upload image → fill form → start clone → see results → download
+- If it doesn't test the actual user experience, it's not a smoke test
+
+**2. Two-repo split: keep test harness and app code in sync.**
+- `screenclone-clean`: PRD, test harness (Playwright configs, test specs), docs, start.sh
+- `screenclone`: actual application code (all US implementations)
+- When running E2E smoke tests, run them against the `screenclone` repo (where the real code lives)
+- Test harness in `screenclone-clean` should be copied/symlinked into `screenclone` for E2E runs
+
+**3. Every screenshot must show actual rendered UI.**
+- After taking a screenshot, verify file size > 50KB (blank dark pages are ~5-15KB)
+- OR verify `#root` innerHTML length > 100 characters
+- If screenshot shows blank page → app is crashing at runtime → fix before proceeding
+
+**4. OpenWaifu WebSocket errors are expected when OLV server is not running.**
+- `ws://localhost:12393/ws` connection refused = normal if OLV not started
+- This should NOT block smoke tests
+- BUT: the CloneyPanel should gracefully handle connection failure (no crash, show "disconnected" status)
+
+**5. Unstaged file changes can break the running app.**
+- Before taking E2E screenshots: `git stash` or commit all changes
+- Vite hot-reload can pick up half-written files and crash React
+- Always verify the app is stable BEFORE capturing evidence
+
 ### 🎭 Playwright Automation
 
 Smoke tests are automated with **Playwright** so they can be run with a single command.

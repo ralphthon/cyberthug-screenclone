@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RalphTon — ScreenClone + Live2D</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#e8e6ee; font-family:'Segoe UI',system-ui,-apple-system,sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+
+.board {
+  display:flex; gap:24px; width:100%; max-width:1440px; height:860px;
+  background:#ddd9e4; border-radius:20px; padding:20px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+}
+
+/* === LEFT PANEL: Dashboard === */
+.dashboard {
+  flex:1; display:flex; gap:16px; min-width:0;
+}
+
+/* Sidebar */
+.sidebar {
+  width:280px; background:linear-gradient(180deg,#1e1a35,#16132a);
+  border-radius:16px; padding:20px; display:flex; flex-direction:column; gap:16px;
+  overflow-y:auto;
+}
+.sidebar-title {
+  font-size:22px; font-weight:700; color:#e2e8f0;
+  display:flex; align-items:center; gap:8px;
+}
+.sidebar-title .logo {
+  width:32px; height:32px; background:#6366f1; border-radius:10px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:12px; font-weight:800; color:#fff;
+}
+.section-label { font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:#94a3b8; font-weight:600; margin-top:4px; }
+
+/* Upload zone */
+.upload-zone {
+  border:2px dashed rgba(99,102,241,0.5); border-radius:12px;
+  background:rgba(37,34,63,0.5); padding:16px; text-align:center;
+  cursor:pointer; transition:border-color 0.2s;
+}
+.upload-zone:hover { border-color:rgba(99,102,241,0.9); }
+.upload-icon { font-size:28px; margin-bottom:6px; }
+.upload-text { font-size:13px; color:#a5b4fc; font-weight:500; }
+.upload-sub { font-size:11px; color:#64748b; margin-top:2px; }
+
+/* Thumbnails */
+.thumb-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+.thumb {
+  aspect-ratio:4/3; border-radius:8px; border:1px solid rgba(99,102,241,0.4);
+  background:rgba(37,34,63,0.6); display:flex; align-items:center; justify-content:center;
+  font-size:9px; color:#818cf8; overflow:hidden;
+}
+.thumb.active { border-color:#6366f1; background:rgba(99,102,241,0.15); }
+
+/* Form inputs */
+.form-group { display:flex; flex-direction:column; gap:4px; }
+.form-label { font-size:11px; color:#94a3b8; font-weight:500; }
+.form-input {
+  background:#1b1930; border:1px solid rgba(99,102,241,0.3); border-radius:8px;
+  padding:8px 10px; font-size:13px; color:#e2e8f0; outline:none;
+  transition:border-color 0.2s;
+}
+.form-input:focus { border-color:#6366f1; }
+.form-select {
+  background:#1b1930; border:1px solid rgba(99,102,241,0.3); border-radius:8px;
+  padding:8px 10px; font-size:13px; color:#e2e8f0; outline:none;
+  appearance:none; cursor:pointer;
+}
+.btn-start {
+  width:100%; padding:10px; border:none; border-radius:10px;
+  background:#6366f1; color:#fff; font-size:14px; font-weight:600;
+  cursor:pointer; transition:background 0.2s;
+}
+.btn-start:hover { background:#4f46e5; }
+
+/* === CENTER: Timeline === */
+.timeline-area {
+  flex:1; background:linear-gradient(180deg,#1e1a35,#16132a);
+  border-radius:16px; padding:20px; display:flex; flex-direction:column;
+  min-width:0; overflow:hidden;
+}
+.timeline-header {
+  display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;
+}
+.timeline-title { font-size:20px; font-weight:700; color:#e2e8f0; }
+.live-badge {
+  display:flex; align-items:center; gap:6px;
+  background:rgba(16,185,129,0.15); padding:4px 12px; border-radius:20px;
+  font-size:11px; font-weight:600; color:#6ee7b7;
+}
+.live-dot { width:8px; height:8px; border-radius:50%; background:#34d399; animation:blink 1.5s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+.timeline-scroll { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-right:4px; }
+
+/* Iteration Card */
+.iter-card {
+  background:#231f3a; border:1px solid rgba(99,102,241,0.25);
+  border-radius:14px; padding:14px 16px; display:flex; align-items:center; gap:14px;
+  transition:border-color 0.2s;
+}
+.iter-card:hover { border-color:rgba(99,102,241,0.5); }
+.iter-card.active {
+  border:2px solid rgba(99,102,241,0.7);
+  animation:pulse-card 2s ease-in-out infinite;
+  background:linear-gradient(135deg,#231f3a,#2a2450);
+}
+@keyframes pulse-card { 0%,100%{border-color:rgba(99,102,241,0.4)} 50%{border-color:rgba(99,102,241,0.9)} }
+
+.iter-num { font-size:15px; font-weight:800; color:#c7d2fe; min-width:28px; }
+.iter-body { flex:1; min-width:0; }
+.iter-status { font-size:13px; font-weight:600; color:#e2e8f0; margin-bottom:2px; }
+.iter-desc { font-size:11px; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.iter-score {
+  font-size:26px; font-weight:800; min-width:70px; text-align:right;
+}
+.score-low { color:#f87171; }
+.score-mid { color:#fbbf24; }
+.score-high { color:#34d399; }
+.iter-progress {
+  font-size:11px; color:#a5b4fc; font-weight:600;
+  display:flex; align-items:center; gap:4px;
+}
+.spinner { width:14px; height:14px; border:2px solid rgba(165,180,252,0.3); border-top-color:#a5b4fc; border-radius:50%; animation:spin 1s linear infinite; }
+@keyframes spin { to{transform:rotate(360deg)} }
+
+/* Score bar at bottom */
+.score-bar-container {
+  margin-top:12px; padding-top:12px; border-top:1px solid rgba(99,102,241,0.2);
+}
+.score-bar-label { display:flex; justify-content:space-between; font-size:11px; color:#94a3b8; margin-bottom:6px; }
+.score-bar-track { height:10px; background:#1a1730; border-radius:8px; overflow:hidden; }
+.score-bar-fill { height:100%; background:linear-gradient(90deg,#ef4444,#f59e0b,#22c55e); border-radius:8px; transition:width 0.5s ease; }
+.target-line { font-size:10px; color:#fbbf24; text-align:right; margin-top:2px; }
+
+/* === RIGHT: Live2D Panel === */
+.live2d-panel {
+  width:300px; display:flex; flex-direction:column; align-items:center; gap:0;
+}
+.device-frame {
+  width:280px; flex:1; background:#0a0a0a; border-radius:20px;
+  border:6px solid #1a1a1a; box-shadow:0 4px 24px rgba(0,0,0,0.4), inset 0 0 30px rgba(0,0,0,0.3);
+  display:flex; flex-direction:column; overflow:hidden; position:relative;
+}
+.device-notch {
+  width:60px; height:6px; background:#1a1a1a; border-radius:0 0 6px 6px;
+  margin:0 auto;
+}
+.live2d-canvas {
+  flex:1; background:linear-gradient(180deg,#1a1535,#0d0b1a);
+  display:flex; align-items:center; justify-content:center;
+  position:relative; overflow:hidden;
+}
+/* Character placeholder */
+.character {
+  text-align:center; position:relative; z-index:1;
+}
+.character-img {
+  font-size:140px; line-height:1; filter:drop-shadow(0 0 30px rgba(236,72,153,0.3));
+}
+.character-glow {
+  position:absolute; bottom:0; left:50%; transform:translateX(-50%);
+  width:200px; height:100px;
+  background:radial-gradient(ellipse,rgba(236,72,153,0.15),transparent 70%);
+}
+/* Expression badge */
+.expression-badge {
+  position:absolute; top:12px; right:12px;
+  background:rgba(236,72,153,0.2); border:1px solid rgba(236,72,153,0.4);
+  border-radius:20px; padding:3px 10px; font-size:11px; color:#f9a8d4;
+}
+/* Score overlay */
+.score-overlay {
+  position:absolute; bottom:12px; left:12px; right:12px;
+  background:rgba(0,0,0,0.6); backdrop-filter:blur(8px);
+  border-radius:10px; padding:10px; text-align:center;
+}
+.score-overlay-label { font-size:10px; color:#94a3b8; }
+.score-overlay-value { font-size:32px; font-weight:800; color:#34d399; }
+.score-overlay-bar { height:4px; background:#1a1730; border-radius:4px; margin-top:6px; overflow:hidden; }
+.score-overlay-fill { height:100%; background:linear-gradient(90deg,#fbbf24,#34d399); border-radius:4px; }
+
+/* Chat area */
+.chat-area {
+  background:#0d0b1a; padding:8px 10px; max-height:180px; overflow-y:auto;
+  display:flex; flex-direction:column; gap:6px; border-top:1px solid #1a1535;
+}
+.chat-msg {
+  max-width:85%; padding:6px 10px; border-radius:10px; font-size:11px; line-height:1.4;
+}
+.chat-cloney { background:#2a2645; color:#e2e8f0; border-top-left-radius:3px; align-self:flex-start; }
+.chat-user { background:rgba(99,102,241,0.3); color:#e2e8f0; border-top-right-radius:3px; align-self:flex-end; }
+.chat-emotion { font-size:9px; color:rgba(249,168,212,0.6); margin-top:2px; }
+.chat-score-badge { display:inline-block; background:rgba(52,211,153,0.2); color:#6ee7b7; padding:1px 6px; border-radius:4px; font-size:10px; margin-left:4px; }
+
+/* Chat input */
+.chat-input-area {
+  display:flex; gap:6px; padding:8px 10px; background:#0a0a0a;
+  border-bottom-left-radius:14px; border-bottom-right-radius:14px;
+}
+.chat-input {
+  flex:1; background:#1b1930; border:1px solid rgba(99,102,241,0.3);
+  border-radius:8px; padding:6px 10px; font-size:12px; color:#e2e8f0; outline:none;
+}
+.chat-send {
+  background:#6366f1; border:none; border-radius:8px; padding:6px 12px;
+  color:#fff; font-size:14px; cursor:pointer; font-weight:700;
+}
+
+.live2d-label {
+  margin-top:10px; font-size:32px; font-weight:900; color:#1a1a2e;
+  letter-spacing:6px; text-transform:uppercase; opacity:0.6;
+}
+</style>
+</head>
+<body>
+
+<div class="board">
+
+  <!-- LEFT: Dashboard -->
+  <div class="dashboard">
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-title">
+        <div class="logo">SC</div>
+        ScreenClone
+      </div>
+
+      <div class="section-label">Reference Screenshots</div>
+      <div class="upload-zone">
+        <div class="upload-icon">📸</div>
+        <div class="upload-text">Drop screenshots here</div>
+        <div class="upload-sub">PNG, JPG, WEBP</div>
+      </div>
+
+      <div class="thumb-grid">
+        <div class="thumb active">landing</div>
+        <div class="thumb active">about</div>
+        <div class="thumb active">pricing</div>
+        <div class="thumb"></div>
+        <div class="thumb"></div>
+        <div class="thumb"></div>
+      </div>
+
+      <div class="form-group">
+        <div class="form-label">Project Name</div>
+        <input class="form-input" value="MyStartup Landing" />
+      </div>
+
+      <div class="form-group">
+        <div class="form-label">Max Iterations</div>
+        <input class="form-input" type="number" value="1000" />
+      </div>
+
+      <div class="form-group">
+        <div class="form-label">Target Similarity</div>
+        <input class="form-input" type="number" value="90" />
+      </div>
+
+      <div class="form-group">
+        <div class="form-label">Model</div>
+        <select class="form-select">
+          <option>Claude 4 Sonnet</option>
+          <option>GPT-5.3 Codex</option>
+          <option>Gemini 3 Pro</option>
+        </select>
+      </div>
+
+      <button class="btn-start">🚀 Start Cloning</button>
+    </div>
+
+    <!-- Center: Timeline -->
+    <div class="timeline-area">
+      <div class="timeline-header">
+        <div class="timeline-title">Iteration Timeline</div>
+        <div class="live-badge"><div class="live-dot"></div> Live</div>
+      </div>
+
+      <div class="timeline-scroll">
+        <!-- Active iteration -->
+        <div class="iter-card active">
+          <div class="iter-num">#7</div>
+          <div class="iter-body">
+            <div class="iter-status">Iteration #7 — In Progress</div>
+            <div class="iter-progress"><div class="spinner"></div> Refining header gradient & button alignment...</div>
+          </div>
+          <div class="iter-score score-high">74%</div>
+        </div>
+
+        <div class="iter-card">
+          <div class="iter-num">#6</div>
+          <div class="iter-body">
+            <div class="iter-status">Layout structure improved</div>
+            <div class="iter-desc">Fixed card grid spacing, added hover states, adjusted font weights</div>
+          </div>
+          <div class="iter-score score-high">74%</div>
+        </div>
+
+        <div class="iter-card">
+          <div class="iter-num">#5</div>
+          <div class="iter-body">
+            <div class="iter-status">Color palette aligned</div>
+            <div class="iter-desc">Matched primary gradient, corrected background tones</div>
+          </div>
+          <div class="iter-score score-mid">61%</div>
+        </div>
+
+        <div class="iter-card">
+          <div class="iter-num">#4</div>
+          <div class="iter-body">
+            <div class="iter-status">Component structure formed</div>
+            <div class="iter-desc">Nav, hero, cards, footer components identified and scaffolded</div>
+          </div>
+          <div class="iter-score score-mid">48%</div>
+        </div>
+
+        <div class="iter-card">
+          <div class="iter-num">#3</div>
+          <div class="iter-body">
+            <div class="iter-status">Basic layout rendered</div>
+            <div class="iter-desc">Flexbox/grid layout established, responsive breakpoints set</div>
+          </div>
+          <div class="iter-score score-low">32%</div>
+        </div>
+
+        <div class="iter-card">
+          <div class="iter-num">#2</div>
+          <div class="iter-body">
+            <div class="iter-status">Initial HTML structure</div>
+            <div class="iter-desc">Semantic HTML generated from vision analysis, basic CSS applied</div>
+          </div>
+          <div class="iter-score score-low">18%</div>
+        </div>
+
+        <div class="iter-card">
+          <div class="iter-num">#1</div>
+          <div class="iter-body">
+            <div class="iter-status">Vision analysis complete</div>
+            <div class="iter-desc">Screenshot analyzed: 3 sections, 12 components, 6 colors extracted</div>
+          </div>
+          <div class="iter-score score-low">5%</div>
+        </div>
+      </div>
+
+      <!-- Score progression bar -->
+      <div class="score-bar-container">
+        <div class="score-bar-label">
+          <span>Iter #1 — 5%</span>
+          <span>Current — 74%</span>
+        </div>
+        <div class="score-bar-track">
+          <div class="score-bar-fill" style="width:74%"></div>
+        </div>
+        <div class="target-line">Target: 90% ──────────────────────▸</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Live2D Panel -->
+  <div class="live2d-panel">
+    <div class="device-frame">
+      <div class="device-notch"></div>
+
+      <!-- Live2D Canvas -->
+      <div class="live2d-canvas">
+        <div class="character-glow"></div>
+        <div class="character">
+          <div class="character-img">👩‍🎤</div>
+        </div>
+        <div class="expression-badge">😊 joy</div>
+        <div class="score-overlay">
+          <div class="score-overlay-label">Clone Progress</div>
+          <div class="score-overlay-value">74%</div>
+          <div class="score-overlay-bar">
+            <div class="score-overlay-fill" style="width:74%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat -->
+      <div class="chat-area">
+        <div class="chat-msg chat-user">이 랜딩페이지 클론해줘</div>
+        <div class="chat-msg chat-cloney">
+          시작할게~ 스크린샷 분석 중이야! 🔍
+          <div class="chat-emotion">[joy] 😊</div>
+        </div>
+        <div class="chat-msg chat-cloney">
+          오~ 점점 비슷해지고 있어!
+          <span class="chat-score-badge">61%</span>
+          <div class="chat-emotion">[joy] 😊</div>
+        </div>
+        <div class="chat-msg chat-user">어디까지 했어?</div>
+        <div class="chat-msg chat-cloney">
+          지금 반복 #7 진행 중이야~ 헤더 그라디언트 고치고 있어. 74%까지 왔어!
+          <span class="chat-score-badge">74%</span>
+          <div class="chat-emotion">[neutral] 😐</div>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div class="chat-input-area">
+        <input class="chat-input" placeholder="Cloney에게 말하기..." />
+        <button class="chat-send">→</button>
+      </div>
+    </div>
+
+    <div class="live2d-label">LIVE 2D</div>
+  </div>
+
+</div>
+
+</body>
+</html>
