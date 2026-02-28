@@ -437,7 +437,8 @@
         "Docker-compatible: setup.sh works in both local dev and container environments",
         "Typecheck passes"
       ],
-      "passes": false
+      "passes": false,
+      "notes": "ralph-image-analysis is ALREADY included at deps/ralph-image-analysis/ (no need to clone). setup.sh just needs to verify it exists, install its npm deps if any, and check omx CLI availability."
     },
     {
       "id": "US-021",
@@ -461,7 +462,7 @@
         "Typecheck passes"
       ],
       "passes": false,
-      "notes": "OpenWaifu repo: https://github.com/HaD0Yun/OpenWaifu.git. Depends on Open-LLM-VTuber v1.2.0+. install.sh copies: qwen3_tts.py, conf.yaml, model_dict.json, live2d-models/WaifuClaw/. DASHSCOPE_API_KEY needed for Alibaba Cloud Qwen3 TTS API."
+      "notes": "OpenWaifu is ALREADY included at deps/OpenWaifu/ (no need to clone). setup.sh just needs to verify it exists, check install.sh is executable, and document DASHSCOPE_API_KEY. Open-LLM-VTuber still needs to be cloned separately if not present."
     }
   ]
 }

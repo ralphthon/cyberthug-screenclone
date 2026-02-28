@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RalphTon PRD Flowchart</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+body { background: #1e1b2e; margin: 0; padding: 20px; font-family: system-ui; }
+h1 { color: #e2e8f0; text-align: center; }
+.mermaid { display: flex; justify-content: center; }
+</style>
+</head>
+<body>
+<h1>🦞 RalphTon (ScreenClone) — PRD Flowchart</h1>
+<div class="mermaid">
+flowchart TD
+    subgraph SCAFFOLD["🏗️ Project Scaffold"]
+        US001["US-001\nVite + React + TS\n+ TailwindCSS"]
+    end
+
+    subgraph UPLOAD["📸 Screenshot Upload"]
+        US002["US-002\nDrag & Drop\nUpload Zone"]
+        US003["US-003\nConfig Form\n+ Validation"]
+        US004["US-004\nExpress Backend\nMultipart Upload API"]
+    end
+
+    subgraph AI_ENGINE["🧠 AI Analysis Engine"]
+        US005["US-005\nVision API\nScreenshot Analyzer"]
+        US007["US-007\nPuppeteer\nHeadless Render"]
+        US008["US-008\nVision Verdict\n+ Pixelmatch Diff"]
+    end
+
+    subgraph RALPH_LOOP["🔄 Ralph Loop Core"]
+        US006["US-006\nRalph Process\nManager"]
+        US009["US-009\nLoop Orchestrator\n+ SSE Streaming"]
+        US017["US-017\nOMX Orchestration\nPer-session prd.json"]
+    end
+
+    subgraph FRONTEND_UI["🎨 Frontend UI"]
+        US010["US-010\nIteration Timeline\nLive Updates"]
+        US011["US-011\nSide-by-Side\nComparison Slider"]
+        US012["US-012\nSimilarity Score\nLine Chart"]
+        US019["US-019\nDark Mode\n+ UI Polish"]
+    end
+
+    subgraph CLONEY["🎭 Cloney (Live2D)"]
+        US015["US-015\nOpenWaifu\nWebSocket Bridge"]
+        US016["US-016\nConversation →\nAction Bridge"]
+        US018["US-018\nEmotion TTS\nProgress Reports"]
+    end
+
+    subgraph OUTPUT["📦 Output"]
+        US013["US-013\nGitHub\nAuto-commit"]
+        US014["US-014\nDownload\nZIP Archive"]
+    end
+
+    subgraph DEPS["⚙️ Dependencies"]
+        US020["US-020\nralph-image-analysis\nSetup Script"]
+        US021["US-021\nOpenWaifu\nSetup Script"]
+    end
+
+    US001 --> US002
+    US001 --> US004
+    US002 --> US003
+    US004 --> US005
+    US005 --> US006
+    US004 --> US007
+    US007 --> US008
+    US006 --> US009
+    US008 --> US009
+    US009 --> US017
+    US017 -->|"feedback loop"| US007
+
+    US009 --> US010
+    US009 --> US011
+    US009 --> US012
+    US010 --> US019
+    US011 --> US019
+    US012 --> US019
+
+    US015 --> US016
+    US016 --> US009
+    US009 --> US018
+    US015 --> US018
+
+    US009 --> US013
+    US009 --> US014
+
+    US020 --> US006
+    US021 --> US015
+
+    style US001 fill:#6366f1,stroke:#818cf8,color:#fff
+    style US002 fill:#8b5cf6,stroke:#a78bfa,color:#fff
+    style US003 fill:#8b5cf6,stroke:#a78bfa,color:#fff
+    style US004 fill:#8b5cf6,stroke:#a78bfa,color:#fff
+    style US005 fill:#f59e0b,stroke:#fbbf24,color:#000
+    style US007 fill:#f59e0b,stroke:#fbbf24,color:#000
+    style US008 fill:#f59e0b,stroke:#fbbf24,color:#000
+    style US006 fill:#ef4444,stroke:#f87171,color:#fff
+    style US009 fill:#ef4444,stroke:#f87171,color:#fff
+    style US017 fill:#ef4444,stroke:#f87171,color:#fff
+    style US010 fill:#10b981,stroke:#34d399,color:#fff
+    style US011 fill:#10b981,stroke:#34d399,color:#fff
+    style US012 fill:#10b981,stroke:#34d399,color:#fff
+    style US019 fill:#10b981,stroke:#34d399,color:#fff
+    style US015 fill:#ec4899,stroke:#f472b6,color:#fff
+    style US016 fill:#ec4899,stroke:#f472b6,color:#fff
+    style US018 fill:#ec4899,stroke:#f472b6,color:#fff
+    style US013 fill:#06b6d4,stroke:#22d3ee,color:#fff
+    style US014 fill:#06b6d4,stroke:#22d3ee,color:#fff
+    style US020 fill:#64748b,stroke:#94a3b8,color:#fff
+    style US021 fill:#64748b,stroke:#94a3b8,color:#fff
+</div>
+<script>mermaid.initialize({theme:'dark',startOnLoad:true})</script>
+</body>
+</html>
