@@ -1,0 +1,77 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "Moc": "长离.moc3",
+    "Textures": [
+      "长离.4096/texture_00.png",
+      "长离.4096/texture_01.png",
+      "长离.4096/texture_02.png",
+      "长离.4096/texture_03.png"
+    ],
+    "Physics": "长离.physics3.json",
+    "DisplayInfo": "长离.cdi3.json",
+    "Expressions": [
+      {
+        "Name": "angry",
+        "File": "EXP3/angry.exp3.json"
+      },
+      {
+        "Name": "blush",
+        "File": "EXP3/blush.exp3.json"
+      },
+      {
+        "Name": "angry2",
+        "File": "EXP3/dark_face.exp3.json"
+      },
+      {
+        "Name": "happy",
+        "File": "EXP3/happy.exp3.json"
+      },
+      {
+        "Name": "pout",
+        "File": "EXP3/pout.exp3.json"
+      },
+      {
+        "Name": "punt2",
+        "File": "EXP3/sad.exp3.json"
+      },
+      {
+        "Name": "smug",
+        "File": "EXP3/smug.exp3.json"
+      },
+      {
+        "Name": "surprised",
+        "File": "EXP3/surprised.exp3.json"
+      },
+      {
+        "Name": "wink",
+        "File": "EXP3/wink.exp3.json"
+      },
+      {
+        "Name": "cry",
+        "File": "EXP3/cry.exp3.json"
+      },
+      {
+        "Name": "nervous",
+        "File": "EXP3/nervous.exp3.json"
+      },
+      {
+        "Name": "neutral",
+        "File": "EXP3/neutral.exp3.json"
+      }
+    ]
+  },
+  "Groups": [
+    {
+      "Target": "Parameter",
+      "Name": "LipSync",
+      "Ids": []
+    },
+    {
+      "Target": "Parameter",
+      "Name": "EyeBlink",
+      "Ids": []
+    }
+  ],
+  "HitAreas": []
+}

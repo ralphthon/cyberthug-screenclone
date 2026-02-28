@@ -1,0 +1,150 @@
+[
+    {
+        "name": "mao_pro",
+        "description": "",
+        "url": "/live2d-models/mao_pro/runtime/mao_pro.model3.json",
+        "kScale": 0.5,
+        "initialXshift": 0,
+        "initialYshift": 0,
+        "kXOffset": 1150,
+        "idleMotionGroupName": "Idle",
+        "emotionMap": {
+            "neutral": 0,
+            "anger": 2,
+            "disgust": 2,
+            "fear": 1,
+            "joy": 3,
+            "smirk": 3,
+            "sadness": 1,
+            "surprise": 3
+        },
+        "tapMotions": {
+            "HitAreaHead": {
+                "": 1
+            },
+            "HitAreaBody": {
+                "": 1
+            }
+        }
+    },
+    {
+        "name": "march7",
+        "description": "March 7th",
+        "url": "/live2d-models/march7/runtime/march7.model3.json",
+        "kScale": 0.5,
+        "initialXshift": 0,
+        "initialYshift": 0,
+        "kXOffset": 1150,
+        "idleMotionGroupName": "Idle",
+        "emotionMap": {
+            "neutral": 0,
+            "anger": 4,
+            "disgust": 6,
+            "fear": 6,
+            "joy": 1,
+            "smirk": 3,
+            "sadness": 5,
+            "surprise": 7
+        },
+        "tapMotions": {
+            "HitAreaHead": {
+                "": 1
+            },
+            "HitAreaBody": {
+                "": 1
+            }
+        }
+    },
+    {
+        "name": "serin",
+        "description": "Serin",
+        "url": "/live2d-models/serin/runtime/serin.model3.json",
+        "kScale": 0.5,
+        "initialXshift": 0,
+        "initialYshift": 0,
+        "kXOffset": 1150,
+        "idleMotionGroupName": "",
+        "emotionMap": {
+            "neutral": 0,
+            "anger": 2,
+            "disgust": 2,
+            "fear": 3,
+            "joy": 1,
+            "smirk": 5,
+            "sadness": 0,
+            "surprise": 2
+        },
+        "tapMotions": {
+            "HitAreaHead": {
+                "": 1
+            },
+            "HitAreaBody": {
+                "": 1
+            }
+        }
+    },
+    {
+        "name": "Serin2",
+        "description": "Serin2",
+        "url": "/live2d-models/Serin2/runtime/Serin2.model3.json",
+        "kScale": 0.5,
+        "initialXshift": 0,
+        "initialYshift": 0,
+        "kXOffset": 1150,
+        "idleMotionGroupName": "",
+        "emotionMap": {
+            "neutral": 0,
+            "anger": 5,
+            "disgust": 4,
+            "fear": 3,
+            "joy": 2,
+            "smirk": 4,
+            "sadness": 1,
+            "surprise": 3
+        },
+        "tapMotions": {
+            "HitAreaHead": {
+                "": 1
+            },
+            "HitAreaBody": {
+                "": 1
+            }
+        }
+    },
+    {
+        "name": "WaifuClaw",
+        "description": "长离 (Changli) - WaifuClaw",
+        "url": "/live2d-models/WaifuClaw/runtime/长离.model3.json",
+        "kScale": 0.5,
+        "initialXshift": 0,
+        "initialYshift": 0,
+        "kXOffset": 1150,
+        "idleMotionGroupName": "",
+        "emotionMap": {
+            "neutral": 11,
+            "anger": [
+                0,
+                2,
+                5
+            ],
+            "disgust": 4,
+            "fear": 10,
+            "joy": [
+                3,
+                6
+            ],
+            "smirk": 8,
+            "sadness": 9,
+            "surprise": 7
+        },
+        "tapMotions": {
+            "HitAreaHead": {
+                "": 1
+            },
+            "HitAreaBody": {
+                "": 1
+            }
+        },
+        "defaultEmotion": 11
+    }
+]

@@ -1,0 +1,60 @@
+{
+  "Type": "Live2D Expression",
+  "Parameters": [
+    {
+      "Id": "Button5",
+      "Value": 1,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamAngleY",
+      "Value": 10,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamAngleX",
+      "Value": -11.905,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamAngleZ",
+      "Value": -0.952,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamMouthForm",
+      "Value": 1,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamMouthOpenY",
+      "Value": 0.532,
+      "Blend": "Add"
+    },
+    {
+      "Id": "MouthShrug",
+      "Value": 1,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamCheekPuff",
+      "Value": 1,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamFacePostionZ",
+      "Value": 0.238,
+      "Blend": "Add"
+    },
+    {
+      "Id": "Button3",
+      "Value": 0.231,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamBreath",
+      "Value": 1,
+      "Blend": "Overwrite"
+    }
+  ]
+}

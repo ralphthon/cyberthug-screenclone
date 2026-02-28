@@ -1,0 +1,55 @@
+{
+  "Type": "Live2D Expression",
+  "Parameters": [
+    {
+      "Id": "Button5",
+      "Value": 1,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamEyeLOpen",
+      "Value": -1,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamAngleX",
+      "Value": -5.714,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamAngleZ",
+      "Value": -10,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamAngleY",
+      "Value": -6.667,
+      "Blend": "Add"
+    },
+    {
+      "Id": "Button3",
+      "Value": 0.667,
+      "Blend": "Add"
+    },
+    {
+      "Id": "Button7",
+      "Value": 0,
+      "Blend": "Add"
+    },
+    {
+      "Id": "Button1",
+      "Value": 1,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamEyeROpen",
+      "Value": -0.179,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamBreath",
+      "Value": 1,
+      "Blend": "Overwrite"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "Type": "Live2D Expression",
+  "Parameters": [
+    {
+      "Id": "Button3",
+      "Value": 0.262,
+      "Blend": "Add"
+    },
+    {
+      "Id": "Button5",
+      "Value": 1,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamBrowRY",
+      "Value": 1,
+      "Blend": "Add"
+    },
+    {
+      "Id": "ParamBreath",
+      "Value": 1,
+      "Blend": "Overwrite"
+    }
+  ]
+}
