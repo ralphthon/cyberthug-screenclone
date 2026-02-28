@@ -10,7 +10,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import CloneyPanel from './components/CloneyPanel';
+import CloneyPanel, {
+  type CloneyBridgeActionResult,
+  type CloneyBridgeLoopEvent,
+  type CloneyBridgePasteResult,
+  type CloneyBridgeStatusResult,
+} from './components/CloneyPanel';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3001';
 
@@ -70,6 +75,15 @@ type LoopStartResponse = {
   maxIterations: number;
   targetScore: number;
   startedAt: string | null;
+};
+
+type LoopStatusResponse = {
+  sessionId: string;
+  state: string;
+  currentIteration: number | null;
+  maxIterations: number | null;
+  lastScore: number | null;
+  bestScore: number | null;
 };
 
 type IterationCard = {
@@ -358,6 +372,7 @@ function App(): JSX.Element {
   const [isDownloadingArchive, setIsDownloadingArchive] = useState(false);
   const [expandedIteration, setExpandedIteration] = useState<number | null>(null);
   const [iterationCards, setIterationCards] = useState<Record<number, IterationCard>>({});
+  const [latestLoopEvent, setLatestLoopEvent] = useState<CloneyBridgeLoopEvent | null>(null);
   const [selectedComparisonIteration, setSelectedComparisonIteration] = useState<number | null>(null);
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('side-by-side');
   const [sliderPosition, setSliderPosition] = useState(50);
@@ -720,6 +735,7 @@ function App(): JSX.Element {
 
   const handleLoopEvent = useCallback(
     (eventName: LoopEventName, messageEvent: MessageEvent<string>) => {
+      let normalizedEventId: number | null = null;
       if (messageEvent.lastEventId) {
         const id = Number(messageEvent.lastEventId);
         if (Number.isInteger(id)) {
@@ -727,6 +743,7 @@ function App(): JSX.Element {
             return;
           }
           processedEventIdsRef.current.add(id);
+          normalizedEventId = id;
         }
       }
 
@@ -734,6 +751,12 @@ function App(): JSX.Element {
       if (!eventData) {
         return;
       }
+
+      setLatestLoopEvent({
+        id: normalizedEventId ?? Date.now() + Math.floor(Math.random() * 1000),
+        event: eventName,
+        payload: eventData,
+      });
 
       if (eventName === 'iteration-start') {
         const iteration = parseNumber(eventData.iteration);
@@ -872,15 +895,15 @@ function App(): JSX.Element {
   );
 
   const handleIncomingFiles = useCallback(
-    (incomingFiles: File[]) => {
+    (incomingFiles: File[]): CloneyBridgePasteResult => {
       if (incomingFiles.length === 0) {
-        return;
+        return { added: 0, rejected: 0 };
       }
 
       let remainingSlots = MAX_FILES - files.length;
       if (remainingSlots <= 0) {
         addToast('Maximum reached. Remove an image before adding more.');
-        return;
+        return { added: 0, rejected: incomingFiles.length };
       }
 
       const acceptedFiles: File[] = [];
@@ -923,6 +946,11 @@ function App(): JSX.Element {
       if (acceptedFiles.length > 0) {
         setFiles((previous) => [...previous, ...acceptedFiles]);
       }
+
+      return {
+        added: acceptedFiles.length,
+        rejected: typeRejections + sizeRejections + overflowRejections,
+      };
     },
     [addToast, files.length],
   );
@@ -1040,9 +1068,13 @@ function App(): JSX.Element {
     [],
   );
 
-  const startCloneLoop = useCallback(async () => {
+  const startCloneLoop = useCallback(async (): Promise<CloneyBridgeActionResult> => {
     if (isCloneRunning) {
-      return;
+      return {
+        ok: false,
+        message: 'A clone session is already running.',
+        sessionId: loopSessionId,
+      };
     }
 
     const nextErrors = validateCloneConfig(cloneConfig);
@@ -1050,12 +1082,20 @@ function App(): JSX.Element {
 
     if (hasErrors) {
       setCloneConfigErrors(nextErrors);
-      return;
+      return {
+        ok: false,
+        message: 'Please fix the clone settings form errors first.',
+        sessionId: null,
+      };
     }
 
     if (files.length === 0) {
       addToast('Upload at least one screenshot before starting.');
-      return;
+      return {
+        ok: false,
+        message: 'Upload screenshots first so I can start cloning.',
+        sessionId: null,
+      };
     }
 
     closeEventStream();
@@ -1070,6 +1110,7 @@ function App(): JSX.Element {
     setIsDownloadEstimateLoading(false);
     setIsDownloadingArchive(false);
     setIterationCards({});
+    setLatestLoopEvent(null);
     setExpandedIteration(null);
     setSelectedComparisonIteration(null);
     setComparisonMode('slider');
@@ -1126,6 +1167,11 @@ function App(): JSX.Element {
       setLoopSessionId(startPayload.sessionId);
       connectToLoopEvents(startPayload.sessionId);
       addToast('Clone session started.');
+      return {
+        ok: true,
+        message: 'Clone session started.',
+        sessionId: startPayload.sessionId,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to start clone loop.';
       setLoopStatus('error');
@@ -1133,6 +1179,11 @@ function App(): JSX.Element {
       setLoopErrorMessage(message);
       setIsCloneRunning(false);
       addToast(message);
+      return {
+        ok: false,
+        message,
+        sessionId: null,
+      };
     }
   }, [
     addToast,
@@ -1141,8 +1192,82 @@ function App(): JSX.Element {
     connectToLoopEvents,
     files,
     isCloneRunning,
+    loopSessionId,
     validateCloneConfig,
   ]);
+
+  const stopCloneLoop = useCallback(async (): Promise<CloneyBridgeActionResult> => {
+    if (!loopSessionId || loopStatus !== 'running') {
+      return {
+        ok: false,
+        message: 'No active clone session to stop.',
+        sessionId: loopSessionId,
+      };
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/loop/${loopSessionId}/stop`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response, 'Failed to stop clone loop.'));
+      }
+
+      addToast('Stopping clone session...');
+      return {
+        ok: true,
+        message: 'Stopping clone session...',
+        sessionId: loopSessionId,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to stop clone session.';
+      addToast(message);
+      return {
+        ok: false,
+        message,
+        sessionId: loopSessionId,
+      };
+    }
+  }, [addToast, loopSessionId, loopStatus]);
+
+  const getLoopStatusSummary = useCallback(async (): Promise<CloneyBridgeStatusResult> => {
+    if (!loopSessionId) {
+      return {
+        ok: false,
+        message: 'No clone session found.',
+        summary: null,
+      };
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/loop/${loopSessionId}/status`);
+      if (!response.ok) {
+        throw new Error(await parseApiError(response, 'Failed to fetch clone status.'));
+      }
+
+      const payload = (await response.json()) as LoopStatusResponse;
+      return {
+        ok: true,
+        message: 'Status fetched.',
+        summary: {
+          sessionId: payload.sessionId,
+          loopStatus: payload.state,
+          currentIteration: payload.currentIteration,
+          maxIterations: payload.maxIterations,
+          lastScore: payload.lastScore,
+          bestScore: payload.bestScore,
+        },
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch clone status.';
+      return {
+        ok: false,
+        message,
+        summary: null,
+      };
+    }
+  }, [loopSessionId]);
 
   const handleDownloadArchive = useCallback(async () => {
     if (!loopSessionId || loopStatus !== 'complete' || isDownloadingArchive) {
@@ -2057,7 +2182,18 @@ function App(): JSX.Element {
           )}
         </section>
       </div>
-      <CloneyPanel />
+      <CloneyPanel
+        bridge={{
+          uploadedFileCount: files.length,
+          maxFiles: MAX_FILES,
+          screencloneSessionId: loopSessionId,
+          latestLoopEvent,
+          addPastedImages: handleIncomingFiles,
+          startClone: startCloneLoop,
+          stopClone: stopCloneLoop,
+          getStatus: getLoopStatusSummary,
+        }}
+      />
 
       <input
         ref={fileInputRef}

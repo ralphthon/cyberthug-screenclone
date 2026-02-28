@@ -5,6 +5,7 @@ type EmotionTag = 'joy' | 'sadness' | 'surprise' | 'neutral';
 type ChatSender = 'user' | 'cloney' | 'system';
 type ConnectionTestState = 'idle' | 'testing' | 'success' | 'failure';
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+type BridgeIntent = 'clone' | 'stop' | 'status' | 'compare' | null;
 
 type OlvConfig = {
   serverUrl: string;
@@ -25,6 +26,55 @@ type ChatMessage = {
 };
 
 type GenericPayload = Record<string, unknown>;
+
+export type CloneyBridgeLoopEventName = 'iteration-start' | 'iteration-complete' | 'loop-complete' | 'loop-error';
+
+export type CloneyBridgeLoopEvent = {
+  id: number;
+  event: CloneyBridgeLoopEventName;
+  payload: Record<string, unknown>;
+};
+
+export type CloneyBridgeActionResult = {
+  ok: boolean;
+  message: string;
+  sessionId?: string | null;
+};
+
+export type CloneyBridgeStatusSummary = {
+  sessionId: string | null;
+  loopStatus: string;
+  currentIteration: number | null;
+  maxIterations: number | null;
+  lastScore: number | null;
+  bestScore: number | null;
+};
+
+export type CloneyBridgeStatusResult = {
+  ok: boolean;
+  message: string;
+  summary: CloneyBridgeStatusSummary | null;
+};
+
+export type CloneyBridgePasteResult = {
+  added: number;
+  rejected: number;
+};
+
+export type CloneyBridgeProps = {
+  uploadedFileCount: number;
+  maxFiles: number;
+  screencloneSessionId: string | null;
+  latestLoopEvent: CloneyBridgeLoopEvent | null;
+  addPastedImages: (files: File[]) => CloneyBridgePasteResult;
+  startClone: () => Promise<CloneyBridgeActionResult>;
+  stopClone: () => Promise<CloneyBridgeActionResult>;
+  getStatus: () => Promise<CloneyBridgeStatusResult>;
+};
+
+type CloneyPanelProps = {
+  bridge: CloneyBridgeProps;
+};
 
 const OLV_CONFIG_STORAGE_KEY = 'ralphton-olv-config';
 const OLV_PANEL_COLLAPSED_STORAGE_KEY = 'ralphton-olv-panel-collapsed';
@@ -71,6 +121,22 @@ const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
   },
 ];
 
+const SCREENCLONE_TOOL_PERSONA_PROMPT = [
+  'You are Cloney, the ScreenClone assistant.',
+  'ScreenClone tools:',
+  "- 'clone|클론|copy|복사|make this|만들어' starts clone when screenshots exist.",
+  "- 'stop|멈춰' stops the active clone session.",
+  "- 'status|어디까지 했어' reports current iteration, score, and loop state.",
+  "- 'compare|비교' explains comparison modes and latest match score.",
+  'Score guide: <30 very early, 30-50 improving slowly, 50-70 strong progress, 70-90 near complete, >90 almost exact.',
+  'Progress reporting style: concise Korean updates with iteration number, score, and change from previous iteration.',
+].join('\n');
+
+const CLONE_INTENT_KEYWORDS = ['clone', '클론', 'copy', '복사', 'make this', '만들어'];
+const STOP_INTENT_KEYWORDS = ['stop', '멈춰'];
+const STATUS_INTENT_KEYWORDS = ['status', '어디까지 했어'];
+const COMPARE_INTENT_KEYWORDS = ['compare', '비교'];
+
 function parseString(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -86,6 +152,83 @@ function parseBoolean(value: unknown): boolean | null {
   }
 
   return null;
+}
+
+function parseNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function includesKeyword(value: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => value.includes(keyword));
+}
+
+function detectBridgeIntent(input: string): BridgeIntent {
+  const normalized = input.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  if (includesKeyword(normalized, CLONE_INTENT_KEYWORDS)) {
+    return 'clone';
+  }
+
+  if (includesKeyword(normalized, STOP_INTENT_KEYWORDS)) {
+    return 'stop';
+  }
+
+  if (includesKeyword(normalized, STATUS_INTENT_KEYWORDS)) {
+    return 'status';
+  }
+
+  if (includesKeyword(normalized, COMPARE_INTENT_KEYWORDS)) {
+    return 'compare';
+  }
+
+  return null;
+}
+
+function describeIterationComplete(score: number | null, previousScore: number | null): { text: string; emotion: EmotionTag } {
+  if (score === null) {
+    return { text: '이번 반복 결과를 받았어. 다음 반복으로 더 맞춰볼게.', emotion: 'neutral' };
+  }
+
+  if (previousScore !== null && score < previousScore) {
+    return { text: `이번 점수는 ${score.toFixed(1)}%야. 살짝 내려갔지만 다시 끌어올릴게.`, emotion: 'sadness' };
+  }
+
+  if (score >= 90) {
+    return { text: `와 거의 똑같아! 현재 ${score.toFixed(1)}%야.`, emotion: 'surprise' };
+  }
+
+  if (score >= 70) {
+    return { text: `오~ ${score.toFixed(1)}%까지 왔어. 거의 다 됐어!`, emotion: 'joy' };
+  }
+
+  if (score >= 50) {
+    return { text: `${score.toFixed(1)}%야. 점점 형태가 맞아가고 있어.`, emotion: 'neutral' };
+  }
+
+  return { text: `${score.toFixed(1)}%야. 아직 초기 단계라 더 다듬어볼게.`, emotion: 'sadness' };
+}
+
+function formatStatusSummary(summary: CloneyBridgeStatusSummary): string {
+  const iterationText =
+    summary.currentIteration !== null && summary.maxIterations !== null
+      ? `${summary.currentIteration}/${summary.maxIterations}`
+      : 'n/a';
+  const scoreText = summary.lastScore !== null ? `${summary.lastScore.toFixed(1)}%` : 'n/a';
+  const bestText = summary.bestScore !== null ? `${summary.bestScore.toFixed(1)}%` : 'n/a';
+
+  return `상태: ${summary.loopStatus} | 반복: ${iterationText} | 현재 점수: ${scoreText} | 최고 점수: ${bestText}`;
 }
 
 function deriveIframeUrlFromWs(serverUrl: string): string {
@@ -201,7 +344,7 @@ function getConnectionLabel(status: OlvConnectionStatus): string {
   return 'Disconnected';
 }
 
-function CloneyPanel(): JSX.Element {
+function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const websocketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -209,6 +352,14 @@ function CloneyPanel(): JSX.Element {
   const collapsedRef = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const sessionBridgeRef = useRef<Map<string, string>>(new Map());
+  const lastHandledLoopEventIdRef = useRef<number | null>(null);
+  const lastMappedSessionIdRef = useRef<string | null>(null);
+  const openWaifuSessionIdRef = useRef<string>(
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `owf-${Date.now()}`,
+  );
 
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(true);
@@ -420,6 +571,15 @@ function CloneyPanel(): JSX.Element {
         reconnectAttemptRef.current = 0;
         setConnectionStatus('connected');
         setConnectionDetail('Connected');
+
+        if (appliedConfig.personaEnabled) {
+          socket.send(
+            JSON.stringify({
+              type: 'persona_prompt',
+              persona_prompt: SCREENCLONE_TOOL_PERSONA_PROMPT,
+            }),
+          );
+        }
       };
 
       socket.onmessage = (event) => {
@@ -469,7 +629,76 @@ function CloneyPanel(): JSX.Element {
       setConnectionStatus('disconnected');
       setConnectionDetail('Disconnected');
     };
-  }, [appliedConfig.serverUrl, closeWebSocket, handleBridgePayload]);
+  }, [appliedConfig.personaEnabled, appliedConfig.serverUrl, closeWebSocket, handleBridgePayload]);
+
+  const mapSessionIdToOpenWaifu = useCallback((sessionId: string | null) => {
+    if (!sessionId) {
+      return;
+    }
+
+    sessionBridgeRef.current.set(openWaifuSessionIdRef.current, sessionId);
+    lastMappedSessionIdRef.current = sessionId;
+  }, []);
+
+  const resolveMappedSessionId = useCallback((): string | null => {
+    return sessionBridgeRef.current.get(openWaifuSessionIdRef.current) ?? bridge.screencloneSessionId;
+  }, [bridge.screencloneSessionId]);
+
+  useEffect(() => {
+    if (!bridge.screencloneSessionId || bridge.screencloneSessionId === lastMappedSessionIdRef.current) {
+      return;
+    }
+
+    mapSessionIdToOpenWaifu(bridge.screencloneSessionId);
+  }, [bridge.screencloneSessionId, mapSessionIdToOpenWaifu]);
+
+  useEffect(() => {
+    const loopEvent = bridge.latestLoopEvent;
+    if (!loopEvent) {
+      return;
+    }
+
+    if (lastHandledLoopEventIdRef.current === loopEvent.id) {
+      return;
+    }
+
+    lastHandledLoopEventIdRef.current = loopEvent.id;
+    const eventSessionId = parseString(loopEvent.payload.sessionId) ?? bridge.screencloneSessionId;
+    mapSessionIdToOpenWaifu(eventSessionId);
+
+    if (loopEvent.event === 'iteration-start') {
+      const iteration = parseNumber(loopEvent.payload.iteration);
+      const maxIterations = parseNumber(loopEvent.payload.maxIterations);
+      const iterationLabel =
+        iteration !== null && maxIterations !== null ? `${iteration}/${maxIterations}` : '다음 반복';
+      appendMessage('cloney', `시작할게~ ${iterationLabel} 반복 진행 중이야.`, 'joy');
+      return;
+    }
+
+    if (loopEvent.event === 'iteration-complete') {
+      const score = parseNumber(loopEvent.payload.score);
+      const previousScore = parseNumber(loopEvent.payload.previousScore);
+      const delta = parseNumber(loopEvent.payload.improvement);
+      const { text, emotion } = describeIterationComplete(score, previousScore);
+      const deltaText = delta !== null ? ` (변화 ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}p)` : '';
+      appendMessage('cloney', `${text}${deltaText}`, emotion);
+      return;
+    }
+
+    if (loopEvent.event === 'loop-complete') {
+      const finalScore = parseNumber(loopEvent.payload.finalScore);
+      const bestIteration = parseNumber(loopEvent.payload.bestIteration);
+      const scoreText = finalScore !== null ? `${finalScore.toFixed(1)}%` : 'n/a';
+      const bestText = bestIteration !== null ? ` 최고 반복은 #${bestIteration}야.` : '';
+      appendMessage('cloney', `클론 완성했어! 최종 점수는 ${scoreText}야.${bestText}`, 'surprise');
+      return;
+    }
+
+    if (loopEvent.event === 'loop-error') {
+      const errorText = parseString(loopEvent.payload.error) ?? '알 수 없는 오류가 발생했어.';
+      appendMessage('cloney', `문제가 생겼어. ${errorText} 다시 시도해볼까?`, 'sadness');
+    }
+  }, [appendMessage, bridge.latestLoopEvent, bridge.screencloneSessionId, mapSessionIdToOpenWaifu]);
 
   const handleConfigChange = useCallback((field: keyof OlvConfig, value: string | boolean) => {
     setOlvConfig((previous) => ({
@@ -511,6 +740,7 @@ function CloneyPanel(): JSX.Element {
             voice: nextConfig.ttsVoice,
           },
           persona_enabled: nextConfig.personaEnabled,
+          persona_prompt: nextConfig.personaEnabled ? SCREENCLONE_TOOL_PERSONA_PROMPT : '',
         }),
       });
 
@@ -609,6 +839,67 @@ function CloneyPanel(): JSX.Element {
     [appendMessage, postMessageToIframe],
   );
 
+  const handleBridgeIntent = useCallback(
+    async (intent: BridgeIntent): Promise<void> => {
+      if (intent === 'clone') {
+        if (bridge.uploadedFileCount <= 0) {
+          appendMessage('cloney', '먼저 스크린샷을 올려줘야 클론을 시작할 수 있어.', 'neutral');
+          return;
+        }
+
+        const result = await bridge.startClone();
+        if (result.ok) {
+          mapSessionIdToOpenWaifu(result.sessionId ?? bridge.screencloneSessionId);
+          const mappedSessionId = resolveMappedSessionId();
+          appendMessage(
+            'cloney',
+            mappedSessionId ? `시작할게~ 세션 ${mappedSessionId}에서 클론을 돌릴게.` : '시작할게~ 클론 루프를 실행했어.',
+            'joy',
+          );
+        } else {
+          appendMessage('cloney', result.message, 'sadness');
+        }
+        return;
+      }
+
+      if (intent === 'stop') {
+        const result = await bridge.stopClone();
+        appendMessage('cloney', result.message, result.ok ? 'neutral' : 'sadness');
+        return;
+      }
+
+      if (intent === 'status') {
+        const result = await bridge.getStatus();
+        if (!result.ok || !result.summary) {
+          appendMessage('cloney', result.message, 'neutral');
+          return;
+        }
+
+        mapSessionIdToOpenWaifu(result.summary.sessionId);
+        appendMessage('cloney', formatStatusSummary(result.summary), 'neutral');
+        return;
+      }
+
+      if (intent === 'compare') {
+        const latestScore =
+          parseNumber(bridge.latestLoopEvent?.payload.score) ??
+          parseNumber(bridge.latestLoopEvent?.payload.finalScore) ??
+          null;
+        if (latestScore !== null) {
+          appendMessage(
+            'cloney',
+            `최근 비교 점수는 ${latestScore.toFixed(1)}%야. Slider / Diff / Side-by-Side로 차이를 확인해줘.`,
+            'neutral',
+          );
+          return;
+        }
+
+        appendMessage('cloney', '아직 비교 점수가 없어. 먼저 클론을 시작해줘.', 'neutral');
+      }
+    },
+    [appendMessage, bridge, mapSessionIdToOpenWaifu, resolveMappedSessionId],
+  );
+
   const handleChatSubmit = useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -619,10 +910,44 @@ function CloneyPanel(): JSX.Element {
       }
 
       appendMessage('user', trimmed, null);
-      sendTextInput(trimmed);
       setChatInput('');
+
+      const intent = detectBridgeIntent(trimmed);
+      if (intent) {
+        void handleBridgeIntent(intent);
+        return;
+      }
+
+      sendTextInput(trimmed);
     },
-    [appendMessage, chatInput, sendTextInput],
+    [appendMessage, chatInput, handleBridgeIntent, sendTextInput],
+  );
+
+  const handleChatPaste = useCallback(
+    (event: React.ClipboardEvent<HTMLInputElement>) => {
+      const clipboardFiles = Array.from(event.clipboardData.files ?? []);
+      const imageFiles = clipboardFiles.filter((file) => file.type.startsWith('image/'));
+      if (imageFiles.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      const pasteResult = bridge.addPastedImages(imageFiles);
+
+      if (pasteResult.added > 0) {
+        const nextCount = Math.min(bridge.uploadedFileCount + pasteResult.added, bridge.maxFiles);
+        appendMessage(
+          'cloney',
+          `이미지 ${pasteResult.added}개를 업로드했어. 지금 ${nextCount}/${bridge.maxFiles}장이야.`,
+          'joy',
+        );
+      }
+
+      if (pasteResult.rejected > 0) {
+        appendMessage('system', `${pasteResult.rejected}개 이미지는 제한(형식/크기/개수) 때문에 제외됐어.`, null);
+      }
+    },
+    [appendMessage, bridge],
   );
 
   const handleVoicePreview = useCallback(() => {
@@ -896,6 +1221,7 @@ function CloneyPanel(): JSX.Element {
               type="text"
               value={chatInput}
               onChange={(event) => setChatInput(event.target.value)}
+              onPaste={handleChatPaste}
               placeholder="Message Cloney..."
               className="w-full rounded-md border border-slate-700 bg-surface/90 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-indigo-400"
             />

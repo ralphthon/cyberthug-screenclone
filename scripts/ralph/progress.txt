@@ -20,6 +20,8 @@
 - For GitHub auto-commit flows, serialize per-session commit work in a promise queue before calling `git.updateRef` so iteration/final commits do not race on the same branch head.
 - For binary export endpoints, serve both `HEAD` and `GET` from the same archive builder so the frontend can show accurate size estimates before downloading.
 - For OLV/WebSocket settings UIs, keep editable form state separate from the applied connection config and only reconnect on explicit save; also wrap `new WebSocket(...)` in `try/catch` for malformed URL handling.
+- For chat-command bridges in React, keep intent execution in the chat component but source action/state from a typed parent-provided bridge object so command parsing stays decoupled from loop orchestration internals.
+- For Cloney command bridging, keep ScreenClone API orchestration in `App.tsx` and pass typed bridge callbacks/event snapshots into `CloneyPanel` so intent parsing stays UI-local while loop state remains single-sourced from SSE.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -385,6 +387,23 @@
   - `npm run build` passed
 - Image-analysis observation (UI story): Compared implemented panel structure/interactions against supplied references (`designs/mockups/us015.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this iteration as **pass** for required US-015 feature coverage and layout intent; automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
 - **Learnings for future iterations:**
-  - For configurable realtime bridges, use a local draft config and a separately applied config to avoid reconnect storms while users type.
-  - WebSocket connection-test handlers should catch constructor errors explicitly because malformed URLs throw before async event callbacks.
+- For configurable realtime bridges, use a local draft config and a separately applied config to avoid reconnect storms while users type.
+- WebSocket connection-test handlers should catch constructor errors explicitly because malformed URLs throw before async event callbacks.
+---
+## 2026-02-28 17:03:22 UTC - US-016
+- Implemented Cloney conversation-to-ScreenClone action bridge in the frontend by wiring typed bridge props from `App.tsx` into `CloneyPanel` and mapping chat intents to loop actions.
+- Added intent detection for `clone|클론|copy|복사|make this|만들어`, `stop|멈춰`, `status|어디까지 했어`, and `compare|비교`; clone intent now starts the loop through the bridge, stop intent calls backend loop stop, status intent fetches `/api/loop/:sessionId/status`, and compare intent reports the latest available score.
+- Added image paste handling on Cloney chat input: pasted image files are forwarded into the uploader state through the shared bridge (`addPastedImages`) with accepted/rejected acknowledgements in chat.
+- Added OpenWaifu session-to-ScreenClone session mapping within Cloney panel state and wired SSE loop events from App (`iteration-start`, `iteration-complete`, `loop-complete`, `loop-error`) into natural Korean progress responses with score-aware emotion tags.
+- Extended OLV persona/tool instructions injection by sending `persona_prompt` through both OLV config sync payload and WebSocket connect-time message when persona mode is enabled.
+- Files changed: `src/client/src/App.tsx`, `src/client/src/components/CloneyPanel.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+- Image-analysis observation (UI story): Compared bridge behavior and panel interactions against supplied references (`designs/mockups/us015.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this iteration as **pass** for US-016 interaction requirements; automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - For conversational command bridges, keep the loop SSE event object in app-level state and pass it down as a typed prop so chat-side narration can react without duplicating transport logic.
+  - Clipboard image ingestion in chat should route through the same upload validator used by drop/browse flows to keep MIME/size/slot constraints consistent.
 ---

@@ -375,9 +375,9 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "Bridge is a React context provider that wraps both OpenWaifu WebSocket and ScreenClone SSE. Intent detection can be simple keyword matching (no NLP needed — Cloney's LLM handles ambiguity).",
-      "status": "pending"
+      "status": "passed"
     },
     {
       "id": "US-017",
