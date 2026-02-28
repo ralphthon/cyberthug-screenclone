@@ -110,6 +110,11 @@ type ApiErrorResponse = {
   error?: string;
 };
 
+type DownloadArchiveHeadResponse = {
+  filename: string | null;
+  bytes: number | null;
+};
+
 const DEFAULT_CLONE_CONFIG: CloneConfig = {
   projectName: '',
   githubRepoUrl: '',
@@ -258,6 +263,47 @@ function toDataUrl(base64: string | null): string | null {
   return `data:image/png;base64,${base64}`;
 }
 
+function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 KB';
+  }
+
+  if (bytes < 1024) {
+    return `${Math.round(bytes)} B`;
+  }
+
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) {
+    return `${kilobytes.toFixed(kilobytes < 10 ? 1 : 0)} KB`;
+  }
+
+  const megabytes = kilobytes / 1024;
+  return `${megabytes.toFixed(megabytes < 10 ? 1 : 0)} MB`;
+}
+
+function parseFilenameFromContentDisposition(disposition: string | null): string | null {
+  if (!disposition) {
+    return null;
+  }
+
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]).trim() || null;
+    } catch {
+      // Fall through to quoted filename parsing.
+    }
+  }
+
+  const quotedMatch = disposition.match(/filename="([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    const value = quotedMatch[1].trim();
+    return value.length > 0 ? value : null;
+  }
+
+  return null;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -305,6 +351,10 @@ function App(): JSX.Element {
   const [loopSummary, setLoopSummary] = useState<{ finalScore: number | null; bestIteration: number | null } | null>(
     null,
   );
+  const [downloadEstimateBytes, setDownloadEstimateBytes] = useState<number | null>(null);
+  const [downloadArchiveName, setDownloadArchiveName] = useState<string | null>(null);
+  const [isDownloadEstimateLoading, setIsDownloadEstimateLoading] = useState(false);
+  const [isDownloadingArchive, setIsDownloadingArchive] = useState(false);
   const [expandedIteration, setExpandedIteration] = useState<number | null>(null);
   const [iterationCards, setIterationCards] = useState<Record<number, IterationCard>>({});
   const [selectedComparisonIteration, setSelectedComparisonIteration] = useState<number | null>(null);
@@ -342,6 +392,19 @@ function App(): JSX.Element {
     }
     return clamp(parsed, 0, 100);
   }, [cloneConfig.targetSimilarity]);
+
+  const fallbackArchiveBytesEstimate = useMemo(() => {
+    const uploadedBytes = files.reduce((total, file) => total + file.size, 0);
+    const iterationImageBytes = Object.values(iterationCards).reduce((total, card) => {
+      const screenshotBytes = card.screenshotBase64 ? Math.floor((card.screenshotBase64.length * 3) / 4) : 0;
+      const diffBytes = card.diffImageBase64 ? Math.floor((card.diffImageBase64.length * 3) / 4) : 0;
+      return total + screenshotBytes + diffBytes;
+    }, 0);
+    const codeBytes = Object.values(iterationCards).reduce((total, card) => total + (card.codePreview?.length ?? 0), 0);
+
+    const estimated = uploadedBytes + Math.floor(iterationImageBytes * 0.35) + codeBytes + 80 * 1024;
+    return Math.max(estimated, 120 * 1024);
+  }, [files, iterationCards]);
 
   const scoreChartData = useMemo<ScoreChartPoint[]>(() => {
     return [...Object.values(iterationCards)]
@@ -483,6 +546,67 @@ function App(): JSX.Element {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
   }, [currentComparisonIteration?.iteration, comparisonMode]);
+
+  useEffect(() => {
+    if (loopStatus !== 'complete' || !loopSessionId) {
+      setIsDownloadEstimateLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+    const controller = new AbortController();
+    setIsDownloadEstimateLoading(true);
+
+    const requestEstimate = async (): Promise<void> => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/loop/${loopSessionId}/download`, {
+          method: 'HEAD',
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(await parseApiError(response, 'Unable to estimate ZIP size.'));
+        }
+
+        const headerPayload: DownloadArchiveHeadResponse = {
+          filename:
+            parseString(response.headers.get('x-archive-name')) ??
+            parseFilenameFromContentDisposition(response.headers.get('content-disposition')),
+          bytes: parseNumber(response.headers.get('x-archive-bytes')) ?? parseNumber(response.headers.get('content-length')),
+        };
+
+        if (!isCancelled) {
+          setDownloadArchiveName(headerPayload.filename);
+          setDownloadEstimateBytes(
+            headerPayload.bytes !== null && Number.isFinite(headerPayload.bytes) && headerPayload.bytes > 0
+              ? Math.round(headerPayload.bytes)
+              : null,
+          );
+        }
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+
+        setDownloadEstimateBytes(null);
+      } finally {
+        if (!isCancelled) {
+          setIsDownloadEstimateLoading(false);
+        }
+      }
+    };
+
+    void requestEstimate();
+
+    return () => {
+      isCancelled = true;
+      controller.abort();
+    };
+  }, [loopSessionId, loopStatus]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -940,6 +1064,10 @@ function App(): JSX.Element {
     setConnectionStatus('connecting');
     setLoopErrorMessage(null);
     setLoopSummary(null);
+    setDownloadEstimateBytes(null);
+    setDownloadArchiveName(null);
+    setIsDownloadEstimateLoading(false);
+    setIsDownloadingArchive(false);
     setIterationCards({});
     setExpandedIteration(null);
     setSelectedComparisonIteration(null);
@@ -1014,6 +1142,47 @@ function App(): JSX.Element {
     isCloneRunning,
     validateCloneConfig,
   ]);
+
+  const handleDownloadArchive = useCallback(async () => {
+    if (!loopSessionId || loopStatus !== 'complete' || isDownloadingArchive) {
+      return;
+    }
+
+    setIsDownloadingArchive(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/loop/${loopSessionId}/download`);
+      if (!response.ok) {
+        throw new Error(await parseApiError(response, 'Failed to download ZIP archive.'));
+      }
+
+      const archiveName =
+        parseFilenameFromContentDisposition(response.headers.get('content-disposition')) ??
+        parseString(response.headers.get('x-archive-name')) ??
+        downloadArchiveName ??
+        `ralphton-${Date.now()}.zip`;
+
+      const blob = await response.blob();
+      if (blob.size > 0) {
+        setDownloadEstimateBytes(blob.size);
+      }
+
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = archiveName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+      addToast('ZIP archive download started.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to download ZIP archive.';
+      addToast(message);
+    } finally {
+      setIsDownloadingArchive(false);
+    }
+  }, [addToast, downloadArchiveName, isDownloadingArchive, loopSessionId, loopStatus]);
 
   const handleStartClone = useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
@@ -1156,6 +1325,11 @@ function App(): JSX.Element {
   const comparisonTransform = `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`;
   const similarityPercent = currentComparisonScore !== null ? clamp(currentComparisonScore, 0, 100) : 0;
   const sliderClip = `inset(0 ${100 - sliderPosition}% 0 0)`;
+  const resolvedArchiveEstimate = downloadEstimateBytes ?? fallbackArchiveBytesEstimate;
+  const downloadEstimatePrefix = downloadEstimateBytes === null ? '~' : '';
+  const downloadButtonLabel = isDownloadingArchive
+    ? 'Preparing ZIP...'
+    : `📦 Download ZIP (${downloadEstimatePrefix}${formatFileSize(resolvedArchiveEstimate)})`;
 
   return (
     <main className="min-h-screen bg-surface text-slate-100">
@@ -1171,11 +1345,28 @@ function App(): JSX.Element {
       </div>
 
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-8">
-        <header className="mb-10 flex items-center gap-3">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-indigo-400 to-indigo-600 text-xs font-bold text-white">
-            SC
-          </span>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-100">ScreenClone</h1>
+        <header className="mb-10 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-indigo-400 to-indigo-600 text-xs font-bold text-white">
+              SC
+            </span>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-100">ScreenClone</h1>
+          </div>
+
+          {loopStatus === 'complete' && loopSessionId ? (
+            <button
+              type="button"
+              onClick={() => {
+                void handleDownloadArchive();
+              }}
+              disabled={isDownloadingArchive}
+              title={downloadArchiveName ?? undefined}
+              className="rounded-lg border border-indigo-400/60 bg-indigo-500/20 px-4 py-2 text-sm font-semibold text-indigo-100 transition hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {downloadButtonLabel}
+              {isDownloadEstimateLoading && downloadEstimateBytes === null ? ' ...' : ''}
+            </button>
+          ) : null}
         </header>
 
         <section className="mx-auto w-full max-w-2xl">

@@ -1,5 +1,6 @@
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import JSZip from 'jszip';
 import multer, { type FileFilterCallback } from 'multer';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -46,6 +47,9 @@ type ApiErrorCode =
   | 'LOOP_NOT_FOUND'
   | 'LOOP_ALREADY_RUNNING'
   | 'LOOP_NOT_RUNNING'
+  | 'LOOP_STILL_RUNNING'
+  | 'LOOP_NOT_COMPLETED'
+  | 'DOWNLOAD_FAILED'
   | 'GITHUB_AUTH_FAILED'
   | 'GITHUB_INVALID_REPO_URL'
   | 'GITHUB_REPOSITORY_NOT_FOUND'
@@ -85,6 +89,7 @@ const TMP_ROOT = '/tmp';
 const STALE_DIR_AGE_MS = 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const ALLOWED_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const SSE_KEEPALIVE_MS = 15_000;
 const MAX_LOOP_EVENT_HISTORY = 200;
 
@@ -137,6 +142,270 @@ type LoopSessionRecord = {
 
 const loopSessions = new Map<string, LoopSessionRecord>();
 let nextSseEventId = 1;
+
+type OriginalUploadAsset = {
+  filename: string;
+  mimeType: string;
+  buffer: Buffer;
+};
+
+type RankedIterationScreenshot = {
+  iteration: number;
+  score: number;
+  base64: string;
+};
+
+const parseNumericValue = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const slugifyProjectName = (value: string): string => {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return normalized.length > 0 ? normalized : 'screenclone';
+};
+
+const formatZipScore = (score: number | null): string => {
+  if (score === null || !Number.isFinite(score)) {
+    return '0';
+  }
+
+  const bounded = Math.max(0, Math.min(100, score));
+  return String(Math.round(bounded));
+};
+
+const getImageMimeTypeFromExtension = (extension: string): string => {
+  if (extension === '.jpg' || extension === '.jpeg') {
+    return 'image/jpeg';
+  }
+
+  if (extension === '.webp') {
+    return 'image/webp';
+  }
+
+  return 'image/png';
+};
+
+const collectOriginalUploadAssets = async (sessionId: string): Promise<OriginalUploadAsset[]> => {
+  const sessionDir = path.join(TMP_ROOT, `${SESSION_DIR_PREFIX}${sessionId}`);
+  let entries: string[];
+  try {
+    entries = await fs.readdir(sessionDir);
+  } catch {
+    return [];
+  }
+
+  const originalFilenames = entries
+    .filter((entry) => ALLOWED_IMAGE_EXTENSIONS.has(path.extname(entry).toLowerCase()))
+    .sort((a, b) => a.localeCompare(b));
+
+  const assets = await Promise.all(
+    originalFilenames.map(async (filename) => {
+      const fullPath = path.join(sessionDir, filename);
+      try {
+        const stat = await fs.stat(fullPath);
+        if (!stat.isFile()) {
+          return null;
+        }
+        const extension = path.extname(filename).toLowerCase();
+        const buffer = await fs.readFile(fullPath);
+        return {
+          filename,
+          mimeType: getImageMimeTypeFromExtension(extension),
+          buffer,
+        } as OriginalUploadAsset;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return assets.filter((asset): asset is OriginalUploadAsset => asset !== null);
+};
+
+const collectBestIterationScreenshots = (session: LoopSessionRecord): RankedIterationScreenshot[] => {
+  const screenshotByIteration = new Map<number, string>();
+
+  for (const event of session.events) {
+    if (event.event !== 'iteration-complete') {
+      continue;
+    }
+
+    const iteration = parseNumericValue(event.data.iteration);
+    const screenshotBase64 = typeof event.data.screenshotBase64 === 'string' ? event.data.screenshotBase64.trim() : '';
+    if (!iteration || !Number.isInteger(iteration) || screenshotBase64.length === 0) {
+      continue;
+    }
+
+    if (!screenshotByIteration.has(iteration)) {
+      screenshotByIteration.set(iteration, screenshotBase64);
+    }
+  }
+
+  return session.iterationHistory
+    .filter((entry): entry is LoopIterationHistoryEntry & { score: number } => entry.score !== null)
+    .filter((entry) => screenshotByIteration.has(entry.iteration))
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      return b.iteration - a.iteration;
+    })
+    .slice(0, 3)
+    .map((entry) => ({
+      iteration: entry.iteration,
+      score: entry.score,
+      base64: screenshotByIteration.get(entry.iteration) ?? '',
+    }))
+    .filter((entry) => entry.base64.length > 0);
+};
+
+const buildDownloadReadme = (params: {
+  projectName: string;
+  finalScore: number | null;
+  totalIterations: number;
+  timestampIso: string;
+  originalScreenshotDataUri: string | null;
+  iterationHistory: LoopIterationHistoryEntry[];
+}): string => {
+  const lines: string[] = [
+    `# ${params.projectName} - Clone Export`,
+    '',
+    `- Final score: ${params.finalScore !== null ? `${params.finalScore.toFixed(2)}%` : 'n/a'}`,
+    `- Total iterations: ${params.totalIterations}`,
+    `- Exported at: ${params.timestampIso}`,
+    '',
+    '## Original Screenshot',
+    '',
+  ];
+
+  if (params.originalScreenshotDataUri) {
+    lines.push(`![Original Screenshot](${params.originalScreenshotDataUri})`);
+  } else {
+    lines.push('Original screenshot unavailable.');
+  }
+
+  lines.push('', '## Score History', '', '| Iteration | Score | Delta | Commit |', '| --- | ---: | ---: | --- |');
+
+  if (params.iterationHistory.length === 0) {
+    lines.push('| - | - | - | - |');
+  } else {
+    for (const entry of params.iterationHistory) {
+      const scoreText = entry.score !== null ? `${entry.score.toFixed(2)}%` : 'n/a';
+      const deltaText = entry.improvement !== null ? `${entry.improvement >= 0 ? '+' : ''}${entry.improvement.toFixed(2)}%` : 'n/a';
+      const commitText = entry.commitUrl ? `[commit](${entry.commitUrl})` : '-';
+      lines.push(`| ${entry.iteration} | ${scoreText} | ${deltaText} | ${commitText} |`);
+    }
+  }
+
+  return `${lines.join('\n')}\n`;
+};
+
+const createLoopDownloadArchive = async (
+  sessionId: string,
+  session: LoopSessionRecord,
+): Promise<{ filename: string; buffer: Buffer }> => {
+  const originalAssets = await collectOriginalUploadAssets(sessionId);
+  const scoreHistory: ScoreHistoryEntry[] = session.iterationHistory
+    .filter((entry): entry is LoopIterationHistoryEntry & { score: number } => entry.score !== null)
+    .sort((a, b) => a.iteration - b.iteration)
+    .map((entry) => ({
+      iteration: entry.iteration,
+      score: entry.score,
+      delta: entry.improvement,
+      commitUrl: entry.commitUrl,
+      recordedAt: new Date(session.startedAtMs + entry.iteration * 1000).toISOString(),
+    }));
+
+  const snapshotFiles = await buildSnapshotFiles({
+    sessionId,
+    projectName: session.config.projectName,
+    targetScore: session.config.targetScore,
+    branchName: session.github?.session.branchName ?? 'local-session',
+    originalScreenshotReference: originalAssets[0]?.filename ?? null,
+    scoreHistory,
+  });
+
+  const totalIterations = session.iterationHistory.reduce((maxIteration, entry) => Math.max(maxIteration, entry.iteration), 0);
+  const finalScore = session.lastIterationScore ?? session.bestScore;
+  const firstOriginal = originalAssets[0] ?? null;
+  const originalScreenshotDataUri = firstOriginal
+    ? `data:${firstOriginal.mimeType};base64,${firstOriginal.buffer.toString('base64')}`
+    : null;
+
+  const readme = buildDownloadReadme({
+    projectName: session.config.projectName,
+    finalScore,
+    totalIterations,
+    timestampIso: new Date().toISOString(),
+    originalScreenshotDataUri,
+    iterationHistory: [...session.iterationHistory].sort((a, b) => a.iteration - b.iteration),
+  });
+
+  const zip = new JSZip();
+  zip.file('index.html', snapshotFiles.indexHtml);
+  zip.file('styles.css', snapshotFiles.stylesCss);
+  zip.file('script.js', snapshotFiles.scriptJs);
+  zip.file('README.md', readme);
+
+  const originalsFolder = zip.folder('originals');
+  if (originalsFolder) {
+    if (originalAssets.length === 0) {
+      originalsFolder.file('README.txt', 'No uploaded reference screenshots were found for this session.\n');
+    } else {
+      for (const asset of originalAssets) {
+        originalsFolder.file(asset.filename, asset.buffer);
+      }
+    }
+  }
+
+  const iterationScreenshots = collectBestIterationScreenshots(session);
+  const iterationsFolder = zip.folder('iterations');
+  if (iterationsFolder) {
+    if (iterationScreenshots.length === 0) {
+      iterationsFolder.file('README.txt', 'No iteration screenshots were available to export.\n');
+    } else {
+      let addedCount = 0;
+      for (const screenshot of iterationScreenshots) {
+        const imageBuffer = Buffer.from(screenshot.base64, 'base64');
+        if (imageBuffer.length === 0) {
+          continue;
+        }
+
+        const scoreToken = screenshot.score.toFixed(2).replace('.', '_');
+        const fileName = `iteration-${String(screenshot.iteration).padStart(2, '0')}-${scoreToken}pct.png`;
+        iterationsFolder.file(fileName, imageBuffer);
+        addedCount += 1;
+      }
+
+      if (addedCount === 0) {
+        iterationsFolder.file('README.txt', 'No valid iteration screenshots were available to export.\n');
+      }
+    }
+  }
+
+  const buffer = await zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 9 },
+  });
+
+  const filename = `ralphton-${slugifyProjectName(session.config.projectName)}-${formatZipScore(finalScore)}pct.zip`;
+  return { filename, buffer };
+};
 
 const sanitizeFilename = (filename: string): string => {
   const base = path.basename(filename).trim();
@@ -1093,6 +1362,64 @@ app.get('/api/loop/:sessionId/status', (req: Request, res: Response, next: NextF
   } catch (error) {
     next(error);
   }
+});
+
+const handleLoopDownloadRequest = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+  options: { headOnly: boolean },
+): Promise<void> => {
+  try {
+    const sessionId = parseLoopString(req.params.sessionId, 'sessionId', true);
+    const session = loopSessions.get(sessionId);
+    if (!session) {
+      throw new ApiError(`Session '${sessionId}' not found`, 'LOOP_NOT_FOUND', 404);
+    }
+
+    const status = getRalphStatusOrNull(sessionId);
+    if (status && isLoopStateActive(status.state)) {
+      throw new ApiError(`Session '${sessionId}' is still running`, 'LOOP_STILL_RUNNING', 409);
+    }
+
+    const isCompleted = status?.state === 'completed' || (session.completedAtMs !== null && session.lastError === null);
+    if (!isCompleted) {
+      throw new ApiError(`Session '${sessionId}' has not completed successfully`, 'LOOP_NOT_COMPLETED', 409);
+    }
+
+    const archive = await createLoopDownloadArchive(sessionId, session);
+
+    res.status(200);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${archive.filename}"`);
+    res.setHeader('Content-Length', archive.buffer.byteLength.toString());
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Archive-Name', archive.filename);
+    res.setHeader('X-Archive-Bytes', archive.buffer.byteLength.toString());
+
+    if (options.headOnly) {
+      res.end();
+      return;
+    }
+
+    res.end(archive.buffer);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      next(error);
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : 'Failed to prepare archive download';
+    next(new ApiError(message, 'DOWNLOAD_FAILED', 500));
+  }
+};
+
+app.head('/api/loop/:sessionId/download', (req: Request, res: Response, next: NextFunction) => {
+  void handleLoopDownloadRequest(req, res, next, { headOnly: true });
+});
+
+app.get('/api/loop/:sessionId/download', (req: Request, res: Response, next: NextFunction) => {
+  void handleLoopDownloadRequest(req, res, next, { headOnly: false });
 });
 
 app.post('/api/loop/:sessionId/stop', (req: Request, res: Response, next: NextFunction) => {

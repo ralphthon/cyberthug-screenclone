@@ -20,6 +20,7 @@
     "@octokit/rest": "^22.0.1",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "jszip": "^3.10.1",
     "multer": "^2.1.0",
     "pixelmatch": "^7.1.0",
     "pngjs": "^7.0.0",

@@ -18,6 +18,7 @@
 - For synchronized comparison panes, keep zoom/pan in one shared transform state and apply it across original/generated/diff canvases; set `touch-action: none` on the canvas to keep pointer drag interactions reliable.
 - For threshold-colored score trends in Recharts, derive a single ordered score dataset from iteration state and split it into low/mid/high data keys so each segment can be rendered with distinct colors while keeping one tooltip source.
 - For GitHub auto-commit flows, serialize per-session commit work in a promise queue before calling `git.updateRef` so iteration/final commits do not race on the same branch head.
+- For binary export endpoints, serve both `HEAD` and `GET` from the same archive builder so the frontend can show accurate size estimates before downloading.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -348,4 +349,23 @@
 - **Learnings for future iterations:**
   - For optional external integrations, validate paired config fields together (`githubUrl` + `githubToken`) and fail fast before expensive analysis/spawn work.
   - Generate README score history from a dedicated in-memory session ledger so every commit (including `[final]`) carries a coherent iteration trail.
+---
+## 2026-02-28 16:14:22 UTC - US-014
+- Implemented ZIP export support for completed loop sessions with new backend download endpoint `GET /api/loop/:sessionId/download` plus `HEAD` metadata support for filename/size estimation.
+- Added in-memory archive generation using `jszip`; archive now includes `index.html`, `styles.css`, `script.js`, `README.md`, `originals/` uploaded reference images, and `iterations/` top-3 scored iteration screenshots.
+- Added export README generation with required metadata: project name, final score, total iterations, export timestamp, embedded original screenshot as base64 data URI, and score history table with commit links when available.
+- Added frontend header-bar download UX: when loop state is complete, UI shows `📦 Download ZIP` button with file size estimate and triggers archive download.
+- Files changed: `src/server/index.ts`, `src/client/src/App.tsx`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `mcp lsp_diagnostics` passed for `src/server/index.ts` (0 errors)
+  - `mcp lsp_diagnostics` passed for `src/client/src/App.tsx` (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implementation intent against supplied mockups (`designs/mockup-v3.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this story as **pass** for required header-level download action visibility on completion; automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - For downloadable session artifacts, generate ZIPs from the same canonical session sources used by loop state (`iterationHistory`, SSE event payload screenshots, and workspace generated files) to avoid export/view drift.
+  - Supporting `HEAD` on download endpoints provides a clean way for frontend controls to show accurate size estimates before triggering binary downloads.
 ---
