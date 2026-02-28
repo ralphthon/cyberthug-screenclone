@@ -33,7 +33,7 @@ Initialize the monorepo structure with a Vite-powered React 18 frontend and a se
 - [ ] Directory structure: src/client/, src/server/, src/shared/types/
 - [ ] package.json has scripts: dev (frontend), server (backend), dev:all (concurrently)
 - [ ] ESLint + Prettier configured with consistent rules
-- [ ] CORS configured on Express to allow localhost:5173
+- [ ] CORS configured on Express to allow localhost/127.0.0.1 and configurable LAN origins (`CORS_ALLOWED_ORIGINS`)
 
 **Notes:** Use concurrently for dev:all script. TailwindCSS config: darkMode 'class', custom colors: primary #6366f1, surface #1e1b2e, card #2a2740.
 
@@ -372,7 +372,7 @@ Integrate OpenWaifu's WebSocket client into the React frontend. Right-side panel
 
 - [ ] Right-side panel (30% width) with 4 sections: OLV Settings (top), Live2D canvas, chat history, text input
 - [ ] OLV Settings section (collapsible with toggle):
-- [ ]   - Server URL input (default ws://localhost:12393/ws, configurable)
+- [ ]   - Server URL input (default ws://localhost:12393/client-ws, configurable)
 - [ ]   - LLM Model dropdown (OpenAI GPT-4o, Claude 4 Sonnet, Gemini 3 Pro, Ollama local, custom)
 - [ ]   - LLM API Key input (password field with show/hide toggle)
 - [ ]   - LLM Base URL input (for custom endpoints)
@@ -529,7 +529,7 @@ As a developer, I want OpenWaifu (Open-LLM-VTuber emotion voice + Live2D model p
 - [ ] Verifies WaifuClaw Live2D model files are copied correctly (model_dict.json, live2d-models/)
 - [ ] Verifies qwen3_tts.py is installed in Open-LLM-VTuber's TTS directory
 - [ ] Verifies conf.yaml is applied with Cloney persona settings
-- [ ] Environment variables documented: DASHSCOPE_API_KEY (required for Qwen3 TTS), OPENWAIFU_WS_URL (optional, default ws://localhost:12393/ws)
+- [ ] Environment variables documented: DASHSCOPE_API_KEY (required for Qwen3 TTS), OPENWAIFU_WS_URL (optional, default ws://localhost:12393/client-ws)
 - [ ] README.md updated with OpenWaifu setup instructions including DASHSCOPE_API_KEY
 - [ ] Backend/frontend startup checks OpenWaifu WebSocket endpoint availability, logs warning if unreachable
 - [ ] .gitignore updated to exclude deps/OpenWaifu/ and deps/Open-LLM-VTuber/
@@ -695,7 +695,7 @@ These rules come from actual bugs encountered during development. **Do not remov
 - If screenshot shows blank page → app is crashing at runtime → fix before proceeding
 
 **4. OpenWaifu WebSocket errors are expected when OLV server is not running.**
-- `ws://localhost:12393/ws` connection refused = normal if OLV not started
+- `ws://localhost:12393/client-ws` connection refused = normal if OLV not started
 - This should NOT block smoke tests
 - BUT: the CloneyPanel should gracefully handle connection failure (no crash, show "disconnected" status)
 
@@ -793,7 +793,7 @@ If any non-skipped test fails → rework the corresponding US per the ST → US 
 
 | # | Test | Expected Result |
 |---|------|-----------------|
-| 1 | OLV server running at `ws://localhost:12393/ws` | WebSocket connects (green status in OLV Settings) |
+| 1 | OLV server running at `ws://localhost:12393/client-ws` | WebSocket connects (green status in OLV Settings) |
 | 2 | Live2D canvas in right panel | WaifuClaw model renders, idle animation plays |
 | 3 | Type message in chat | Cloney responds with voice + expression change |
 | 4 | Start clone session with OLV connected | Cloney narrates progress ("Starting iteration 1...") |
@@ -806,3 +806,41 @@ If any non-skipped test fails → rework the corresponding US per the ST → US 
 | 2 | Open downloaded HTML in browser | Renders the cloned page standalone |
 
 ---
+
+## Risk Forecast (from `screenclone-test` incident review, updated 2026-02-28)
+
+To prevent recurrence of known production blockers, treat the following as mandatory implementation constraints:
+
+1. **API base URL resilience (frontend)**
+   - Do not hardcode `http://localhost:3001` only.
+   - Must support host-aware fallback (`localhost`, `127.0.0.1`, current host) and retry on network `TypeError`.
+   - Timeline/SSE must stay connected when frontend is opened from `127.0.0.1` or LAN host.
+
+2. **CORS resilience (backend)**
+   - Allow local development origins beyond a single literal host.
+   - Support comma-separated override via `CORS_ALLOWED_ORIGINS`.
+   - Verify `Origin: http://127.0.0.1:5173` and `Origin: http://localhost:5173` both succeed.
+
+3. **OpenWaifu websocket path normalization**
+   - Normalize legacy `/ws` to `/client-ws` on both client and server config paths.
+   - Documentation/tests must use `/client-ws` as canonical default.
+
+4. **OpenAI proxy compatibility**
+   - Vision endpoints must use `OPENAI_BASE_URL` instead of hardcoded OpenAI host.
+   - Default vision model must be available on target proxy (avoid unavailable defaults that trigger provider errors).
+
+5. **Cloney TTS playback contract**
+   - On OpenWaifu `audio` payload, frontend must actually play `audio`/`audioBase64`.
+   - After playback queue drains and backend sends `backend-synth-complete`, frontend must send `frontend-playback-complete`.
+   - Missing this handshake is a release blocker (causes “text shown but no voice / chain stall” behavior).
+
+6. **Browser embedding permissions**
+   - Embedded OpenWaifu view must include microphone/autoplay permissions.
+   - `NotAllowedError: Permission denied` for VAD is treated as high-priority regression.
+
+### Additional acceptance checks (must pass before merge)
+
+- [ ] Access app via `http://127.0.0.1:5173` and `http://localhost:5173`; both run clone loop without `Failed to fetch`.
+- [ ] Cloney text input returns both visible text and audible TTS.
+- [ ] OpenWaifu WS connects on `/client-ws` with no manual URL edits.
+- [ ] Vision analysis works with configured `OPENAI_BASE_URL` + `OPENAI_API_KEY` (no invalid key/provider mismatch caused by hardcoded host/model).
