@@ -540,6 +540,50 @@ As a developer, I want OpenWaifu (Open-LLM-VTuber emotion voice + Live2D model p
 
 > Run these after setup to verify the app is working end-to-end. Each test should take < 2 minutes.
 
+### ⚠️ Smoke Test Failure Policy
+
+**If a smoke test fails, the corresponding user story MUST be reworked before proceeding.**
+
+The ralph loop / coding agent should:
+1. Run the relevant smoke tests after completing each US
+2. If any test fails → **stop advancing** to the next US
+3. Identify which test(s) failed and the error details
+4. Re-enter the failed US with the error context as feedback
+5. Fix and re-run the smoke tests until all pass
+6. Only then proceed to the next US
+
+**ST → US Mapping (which US to rework on failure):**
+
+| Smoke Test | Triggers Rework Of | Reason |
+|------------|-------------------|--------|
+| ST-1.1 (setup.sh) | US-020 | Setup script broken |
+| ST-1.2 (typecheck) | Last completed US | Type error introduced |
+| ST-1.3 (lint) | Last completed US | Lint violation introduced |
+| ST-1.4 (build) | Last completed US | Build error introduced |
+| ST-2.1 (server start) | US-004 | Express server broken |
+| ST-2.2 (health check) | US-004 | Health endpoint broken |
+| ST-2.3 (upload success) | US-004 | Upload API broken |
+| ST-2.4 (upload validation) | US-004 | File validation broken |
+| ST-2.5 (size limit) | US-004 | Size limit broken |
+| ST-3.1 (page load) | US-001 | Scaffold / base UI broken |
+| ST-3.2 (drag-drop) | US-002 | Drop zone broken |
+| ST-3.3 (file picker) | US-002 | File picker broken |
+| ST-3.4 (start button) | US-003 | Form / start logic broken |
+| ST-3.5 (remove image) | US-002 | Thumbnail remove broken |
+| ST-3.6 (localStorage) | US-003 | Settings persistence broken |
+| ST-4.1 (session start) | US-005, US-006 | Session init broken |
+| ST-4.2 (iterations) | US-010 | Timeline / iteration flow broken |
+| ST-4.3 (comparison) | US-011 | Comparison slider broken |
+| ST-4.4 (auto-commit) | US-007 | Git integration broken |
+| ST-5.1 (WS connect) | US-015 | OLV connection broken |
+| ST-5.2 (Live2D render) | US-015 | Live2D canvas broken |
+| ST-5.3 (chat) | US-015 | Chat interface broken |
+| ST-5.4 (narration) | US-016 | Progress narration broken |
+| ST-6.1 (download ZIP) | US-014 | Export broken |
+| ST-6.2 (standalone HTML) | US-014 | Generated output broken |
+
+**Gate rule:** `typecheck` + `lint` + `build` (ST-1.2–1.4) must pass after EVERY US. If they break, fix immediately before moving on.
+
 ### ST-1: Environment & Build
 
 | # | Test | Expected Result |
