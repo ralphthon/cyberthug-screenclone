@@ -6,11 +6,22 @@
 
 **Total User Stories:** 21
 
+
+## Full Layout Reference
+
+![Full Layout](designs/mockup-v3-collapsed.png)
+
+Left sidebar (upload + settings) → Center (iteration timeline) → Right (Live2D + OLV settings + chat)
+
 ---
 
 ## US-001: Vite + React + TypeScript + TailwindCSS project scaffold
 
 Initialize the monorepo structure with a Vite-powered React 18 frontend and a separate Express backend directory. Frontend uses TypeScript strict mode and TailwindCSS with dark mode as default. Backend uses TypeScript with ts-node. Shared types in a common directory.
+
+### UI Reference
+
+![US-001 Mockup](designs/mockups/us001.png)
 
 ### Acceptance Criteria
 
@@ -31,6 +42,10 @@ Initialize the monorepo structure with a Vite-powered React 18 frontend and a se
 ## US-002: Drag-and-drop screenshot upload with preview thumbnails
 
 Full-featured drop zone component that accepts PNG/JPG/WEBP screenshots via drag-and-drop or click-to-browse. Shows thumbnail previews with remove buttons. Validates file type and size. Stores files in component state and prepares FormData for upload.
+
+### UI Reference
+
+![US-002 Mockup](designs/mockups/us002.png)
 
 ### Acceptance Criteria
 
@@ -54,6 +69,10 @@ Full-featured drop zone component that accepts PNG/JPG/WEBP screenshots via drag
 ## US-003: Clone session configuration form with validation
 
 Form below the upload zone with project name, GitHub repo URL, GitHub token, max iterations, and target similarity score. Validates required fields. Saves last-used settings to localStorage. Start button triggers the clone session.
+
+### UI Reference
+
+![US-003 Mockup](designs/mockups/us003.png)
 
 ### Acceptance Criteria
 
@@ -220,6 +239,10 @@ POST /api/loop/start initiates a full clone session: upload → analyze → spaw
 
 Main frontend view showing iteration progress as a vertical timeline of cards. Cards appear in real-time as SSE events arrive. Each card shows iteration number, thumbnail screenshot, similarity score with color coding, improvement delta, and feedback text. Clicking a card expands to show full screenshot + code.
 
+### UI Reference
+
+![US-010 Mockup](designs/mockups/us010.png)
+
 ### Acceptance Criteria
 
 - [ ] Timeline renders as vertical list, newest iteration at top
@@ -242,6 +265,10 @@ Main frontend view showing iteration progress as a vertical timeline of cards. C
 ## US-011: Side-by-side original vs clone comparison view with slider
 
 Split comparison view: original screenshot (left) vs latest generated output (right). Interactive slider overlay that blends between the two. Toggle for pixel-diff red overlay mode. Similarity score bar between images.
+
+### UI Reference
+
+![US-011 Mockup](designs/mockups/us011.png)
 
 ### Acceptance Criteria
 
@@ -333,36 +360,39 @@ Button to download the final generated website as a production-ready ZIP file. I
 
 Integrate OpenWaifu's WebSocket client into the React frontend. Right-side panel contains: (1) OLV Settings section at top — server URL, LLM model selection, API key, TTS voice, persona toggle, connection test button. (2) Live2D canvas rendering WaifuClaw model in the middle. (3) Chat history with conversation bubbles. (4) Text input at bottom. Panel connects to OpenWaifu/OLV server via WebSocket.
 
+### UI Reference
+
+**Collapsed (default):**
+![US-015 Collapsed](designs/mockup-v3-collapsed.png)
+
+**Settings drawer open:**
+![US-015 Expanded](designs/mockup-v3-expanded.png)
+
 ### Acceptance Criteria
 
-- [ ] Right-side panel (30% width) with 4 sections: OLV status bar (top), Live2D canvas, chat history, text input
-- [ ] OLV status bar (always visible, collapsed by default):
-- [ ]   - Shows connection status dot (green/yellow/red) + 'OLV Connected' text
-- [ ]   - Shows current model + voice as compact info ('Claude 4 Sonnet · Sohee')
-- [ ]   - ⚙️ expand button on right side to open settings drawer
-- [ ] OLV Settings drawer (hidden by default, slides open on ⚙️ click):
-- [ ]   - Server URL input (default ws://localhost:12393/ws)
-- [ ]   - LLM Model dropdown (GPT-4o, Claude 4 Sonnet, Gemini 3 Pro, Ollama local, Custom)
-- [ ]   - TTS Voice selector (Sohee default)
+- [ ] Right-side panel (30% width) with 4 sections: OLV Settings (top), Live2D canvas, chat history, text input
+- [ ] OLV Settings section (collapsible with toggle):
+- [ ]   - Server URL input (default ws://localhost:12393/ws, configurable)
+- [ ]   - LLM Model dropdown (OpenAI GPT-4o, Claude 4 Sonnet, Gemini 3 Pro, Ollama local, custom)
 - [ ]   - LLM API Key input (password field with show/hide toggle)
 - [ ]   - LLM Base URL input (for custom endpoints)
-- [ ]   - 🔌 Test Connection button — pings OLV WebSocket, shows green/red status + ping ms
-- [ ]   - 💾 Save Settings button — persists to localStorage
-- [ ]   - ✕ close button to collapse drawer back
-- [ ]   - Slide animation (max-height transition, 300ms ease)
+- [ ]   - TTS Voice selector (Sohee default, with preview button)
+- [ ]   - Persona toggle (enable/disable custom persona prompt)
+- [ ]   - Connection test button — pings OLV WebSocket, shows green/red status
+- [ ]   - Save Settings button — persists to localStorage
 - [ ]   - Settings auto-loaded from localStorage on mount
 - [ ] Live2D canvas renders WaifuClaw model via pixi-live2d-display or OpenWaifu's built-in renderer
 - [ ] WebSocket connects using configured server URL from settings
 - [ ] Handles WebSocket message types: text-input (send), audio-play-start (receive), display_text (receive), set-expression (receive)
 - [ ] Chat history shows conversation bubbles: user (right, primary) and Cloney (left, card color)
 - [ ] Cloney messages include emotion tags: [joy]→😊, [sadness]→😢, [surprise]→😲, [neutral]→😐
-- [ ] Connection status indicator synced with status bar dot
+- [ ] Connection status indicator: green (connected), yellow (connecting), red (disconnected)
 - [ ] Auto-reconnect on disconnect with exponential backoff (1s→30s max)
 - [ ] Panel collapsible via toggle button (saves state to localStorage)
 - [ ] When collapsed: floating Cloney avatar (64x64) in bottom-right with unread badge
 - [ ] Typecheck passes
 
-**Notes:** OLV settings map to conf.yaml fields: openai_compatible_llm.base_url, openai_compatible_llm.llm_api_key, openai_compatible_llm.model, qwen3_tts.voice. Settings saved to localStorage key: "ralphton-olv-config". UI pattern: collapsed status bar by default, ⚙️ button opens slide-down drawer with full settings. See designs/mockup-v3-collapsed.png and mockup-v3-expanded.png for reference.
+**Notes:** OLV settings map to conf.yaml fields: openai_compatible_llm.base_url, openai_compatible_llm.llm_api_key, openai_compatible_llm.model, qwen3_tts.voice. Settings saved to localStorage key: "ralphton-olv-config". On save, optionally POST to OLV /api/config to hot-reload without restart. Connection test: WebSocket open + close within 3s = success.
 
 ---
 
