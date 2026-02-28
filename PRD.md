@@ -535,3 +535,64 @@ As a developer, I want OpenWaifu (Open-LLM-VTuber emotion voice + Live2D model p
 **Notes:** OpenWaifu is ALREADY included at deps/OpenWaifu/ (no need to clone). setup.sh just needs to verify it exists, check install.sh is executable, and document DASHSCOPE_API_KEY. Open-LLM-VTuber still needs to be cloned separately if not present.
 
 ---
+
+## 🧪 Smoke Test Checklist
+
+> Run these after setup to verify the app is working end-to-end. Each test should take < 2 minutes.
+
+### ST-1: Environment & Build
+
+| # | Test | Expected Result |
+|---|------|-----------------|
+| 1 | `./setup.sh` | All checks show ✅ (Python/uv/omx warnings are OK if not using OLV) |
+| 2 | `npm run typecheck` | Exit code 0, no errors |
+| 3 | `npm run lint` | Exit code 0, no errors |
+| 4 | `npm run build` | Builds client + server without errors |
+
+### ST-2: Backend API
+
+| # | Test | Expected Result |
+|---|------|-----------------|
+| 1 | Start server: `npm run server` | Starts on port 3001, no crash |
+| 2 | `curl http://localhost:3001/api/health` | `{ "status": "ok", "version": "1.0.0" }` |
+| 3 | Upload test image: `curl -X POST -F "images=@test.png" http://localhost:3001/api/upload` | 200 OK, returns file paths + metadata JSON |
+| 4 | Upload non-image file | 400 error with validation message |
+| 5 | Upload >10MB file | 400 error with size limit message |
+
+### ST-3: Frontend UI
+
+| # | Test | Expected Result |
+|---|------|-----------------|
+| 1 | `npm run dev:all` then open `http://localhost:5173` | Page loads, shows 'RalphTon' heading with gradient text on dark background |
+| 2 | Drag an image onto drop zone | Border highlights on dragenter, thumbnail appears after drop |
+| 3 | Click drop zone → file picker | Opens file browser, selected image appears as thumbnail |
+| 4 | Fill project name + drop image → click Start | Start button becomes enabled, click triggers session |
+| 5 | Remove uploaded image via X button | Thumbnail removed, counter updates |
+| 6 | Form settings persist across refresh | Fill form → refresh → values restored from localStorage |
+
+### ST-4: Clone Session (Integration)
+
+| # | Test | Expected Result |
+|---|------|-----------------|
+| 1 | Start a clone with a simple screenshot (e.g. google.com) | Session starts, timeline shows iteration 0 |
+| 2 | Watch 2-3 iterations | Timeline cards appear with rendered previews + scores |
+| 3 | Open comparison view | Slider works between original and generated screenshot |
+| 4 | Check iteration commits | `git log` shows auto-commits per iteration |
+
+### ST-5: Live2D / OpenWaifu (Optional — skip if OLV not set up)
+
+| # | Test | Expected Result |
+|---|------|-----------------|
+| 1 | OLV server running at `ws://localhost:12393/ws` | WebSocket connects (green status in OLV Settings) |
+| 2 | Live2D canvas in right panel | WaifuClaw model renders, idle animation plays |
+| 3 | Type message in chat | Cloney responds with voice + expression change |
+| 4 | Start clone session with OLV connected | Cloney narrates progress ("Starting iteration 1...") |
+
+### ST-6: Export & Download
+
+| # | Test | Expected Result |
+|---|------|-----------------|
+| 1 | After ≥1 iteration, click Download/Export | ZIP file downloads with generated HTML/CSS/JS |
+| 2 | Open downloaded HTML in browser | Renders the cloned page standalone |
+
+---
