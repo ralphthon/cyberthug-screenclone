@@ -584,6 +584,52 @@ The ralph loop / coding agent should:
 
 **Gate rule:** `typecheck` + `lint` + `build` (ST-1.2–1.4) must pass after EVERY US. If they break, fix immediately before moving on.
 
+### 🎭 Playwright Automation
+
+Smoke tests are automated with **Playwright** so they can be run with a single command.
+
+**Setup:**
+```bash
+npm install -D @playwright/test
+npx playwright install --with-deps chromium
+```
+
+**Run:**
+```bash
+npm run test:smoke            # Run all smoke tests (headless)
+npm run test:smoke:ui         # Run with Playwright UI (interactive)
+npx playwright test tests/smoke/st3-frontend.spec.ts   # Run specific suite
+```
+
+**Test structure:**
+```
+tests/
+├── smoke/
+│   ├── st1-build.spec.ts        # Environment & build checks
+│   ├── st2-backend.spec.ts      # Backend API tests
+│   ├── st3-frontend.spec.ts     # Frontend UI tests (Playwright browser)
+│   ├── st4-integration.spec.ts  # Clone session (test.skip — needs ralph backend)
+│   ├── st5-olv.spec.ts          # Live2D/OpenWaifu (test.skip — optional dep)
+│   └── st6-export.spec.ts       # Export/download (test.skip — needs iteration)
+├── fixtures/
+│   └── test-screenshot.png      # 100×100 test image for upload tests
+└── playwright.config.ts         # Playwright config (baseURL, webServer, chromium-only)
+```
+
+**Playwright config requirements:**
+- `baseURL`: `http://localhost:5173`
+- `webServer`: starts `npm run dev:all`, waits for port 5173
+- Browser: chromium only (no firefox/webkit)
+- Timeout: 30s per test, 1 retry
+- Test fixture image at `tests/fixtures/test-screenshot.png`
+
+**Integration with ralph loop:**
+After completing each US, the coding agent should run:
+```bash
+npx playwright test tests/smoke/
+```
+If any non-skipped test fails → rework the corresponding US per the ST → US mapping table above.
+
 ### ST-1: Environment & Build
 
 | # | Test | Expected Result |
