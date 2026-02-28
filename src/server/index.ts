@@ -5,9 +5,13 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { CompareError, compareScreenshots } from './compareService.js';
-import { RalphProcessManager } from './ralphProcessManager.js';
+import {
+  RalphProcessManager,
+  type RalphSessionState,
+  type RalphSessionStatus,
+} from './ralphProcessManager.js';
 import { RenderError, closeRenderBrowser, renderHtmlToScreenshot } from './renderService.js';
-import { AnalysisError, analyzeSessionScreenshots } from './visionAnalyzer.js';
+import { AnalysisError, analyzeSessionScreenshots, type AnalysisResult } from './visionAnalyzer.js';
 
 type ApiErrorCode =
   | 'NO_FILES'
@@ -30,6 +34,10 @@ type ApiErrorCode =
   | 'RENDER_TIMEOUT'
   | 'RENDER_FAILED'
   | 'BROWSER_UNAVAILABLE'
+  | 'LOOP_NOT_FOUND'
+  | 'LOOP_ALREADY_RUNNING'
+  | 'LOOP_NOT_RUNNING'
+  | 'LOOP_START_FAILED'
   | 'INTERNAL_ERROR';
 
 class ApiError extends Error {
@@ -64,6 +72,43 @@ const TMP_ROOT = '/tmp';
 const STALE_DIR_AGE_MS = 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const SSE_KEEPALIVE_MS = 15_000;
+const MAX_LOOP_EVENT_HISTORY = 200;
+
+type LoopStartConfig = {
+  projectName: string;
+  maxIterations: number;
+  targetScore: number;
+  githubUrl?: string;
+  githubToken?: string;
+};
+
+type LoopEventName = 'iteration-start' | 'iteration-complete' | 'loop-complete' | 'loop-error';
+
+type LoopEventEnvelope = {
+  id: number;
+  event: LoopEventName;
+  data: Record<string, unknown>;
+};
+
+type LoopSessionRecord = {
+  sessionId: string;
+  config: LoopStartConfig;
+  analysis: AnalysisResult | null;
+  startedAtMs: number;
+  startedAtIso: string;
+  completedAtMs: number | null;
+  bestScore: number | null;
+  bestIteration: number;
+  lastError: string | null;
+  lastIterationScore: number | null;
+  lastIterationEventKey: string | null;
+  events: LoopEventEnvelope[];
+  subscribers: Set<Response>;
+};
+
+const loopSessions = new Map<string, LoopSessionRecord>();
+let nextSseEventId = 1;
 
 const sanitizeFilename = (filename: string): string => {
   const base = path.basename(filename).trim();
@@ -272,6 +317,357 @@ const parseOptionalInteger = (
   return parsedValue;
 };
 
+const parseLoopString = (rawValue: unknown, field: string, required: boolean): string => {
+  if (typeof rawValue !== 'string') {
+    if (required) {
+      throw new ApiError(`${field} is required`, 'INVALID_REQUEST', 400);
+    }
+
+    return '';
+  }
+
+  const trimmed = rawValue.trim();
+  if (required && trimmed.length === 0) {
+    throw new ApiError(`${field} is required`, 'INVALID_REQUEST', 400);
+  }
+
+  return trimmed;
+};
+
+const parseLoopInteger = (rawValue: unknown, field: string, min: number, max: number): number => {
+  const parsedValue =
+    typeof rawValue === 'number'
+      ? rawValue
+      : typeof rawValue === 'string'
+        ? Number(rawValue)
+        : Number.NaN;
+
+  if (!Number.isInteger(parsedValue) || parsedValue < min || parsedValue > max) {
+    throw new ApiError(`${field} must be an integer between ${min} and ${max}`, 'INVALID_REQUEST', 400);
+  }
+
+  return parsedValue;
+};
+
+const isLoopStateActive = (state: RalphSessionState): boolean =>
+  state === 'uploading' || state === 'analyzing' || state === 'cloning';
+
+const getRalphStatusOrNull = (sessionId: string): RalphSessionStatus | null => {
+  try {
+    return ralphProcessManager.getStatus(sessionId);
+  } catch {
+    return null;
+  }
+};
+
+const parseLoopStartRequest = (body: unknown): { sessionId: string; config: LoopStartConfig } => {
+  const payload = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const sessionId = parseLoopString(payload.sessionId, 'sessionId', true);
+  const configRaw = payload.config && typeof payload.config === 'object' ? (payload.config as Record<string, unknown>) : null;
+
+  if (!configRaw) {
+    throw new ApiError('config is required', 'INVALID_REQUEST', 400);
+  }
+
+  const projectName = parseLoopString(configRaw.projectName, 'config.projectName', true);
+  const maxIterations = parseLoopInteger(configRaw.maxIterations, 'config.maxIterations', 1, 10_000);
+  const targetScoreValue = configRaw.targetScore ?? 90;
+  const targetScore = parseLoopInteger(targetScoreValue, 'config.targetScore', 0, 100);
+  const githubUrl = parseLoopString(configRaw.githubUrl, 'config.githubUrl', false);
+  const githubToken = parseLoopString(configRaw.githubToken, 'config.githubToken', false);
+
+  if (githubUrl.length > 0) {
+    try {
+      const parsedUrl = new URL(githubUrl);
+      if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+        throw new Error('invalid protocol');
+      }
+    } catch {
+      throw new ApiError('config.githubUrl must be a valid URL', 'INVALID_REQUEST', 400);
+    }
+  }
+
+  return {
+    sessionId,
+    config: {
+      projectName,
+      maxIterations,
+      targetScore,
+      githubUrl: githubUrl.length > 0 ? githubUrl : undefined,
+      githubToken: githubToken.length > 0 ? githubToken : undefined,
+    },
+  };
+};
+
+const createLoopSessionRecord = (
+  sessionId: string,
+  config: LoopStartConfig,
+  analysis: AnalysisResult | null,
+): LoopSessionRecord => ({
+  sessionId,
+  config,
+  analysis,
+  startedAtMs: Date.now(),
+  startedAtIso: new Date().toISOString(),
+  completedAtMs: null,
+  bestScore: null,
+  bestIteration: 0,
+  lastError: null,
+  lastIterationScore: null,
+  lastIterationEventKey: null,
+  events: [],
+  subscribers: new Set<Response>(),
+});
+
+const writeSseEvent = (res: Response, envelope: LoopEventEnvelope): boolean => {
+  try {
+    res.write(`id: ${envelope.id}\n`);
+    res.write(`event: ${envelope.event}\n`);
+    res.write(`data: ${JSON.stringify(envelope.data)}\n\n`);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const publishLoopEvent = (sessionId: string, event: LoopEventName, data: Record<string, unknown>): void => {
+  const session = loopSessions.get(sessionId);
+  if (!session) {
+    return;
+  }
+
+  const envelope: LoopEventEnvelope = {
+    id: nextSseEventId++,
+    event,
+    data,
+  };
+
+  session.events.push(envelope);
+  if (session.events.length > MAX_LOOP_EVENT_HISTORY) {
+    session.events.splice(0, session.events.length - MAX_LOOP_EVENT_HISTORY);
+  }
+
+  for (const subscriber of Array.from(session.subscribers)) {
+    const wrote = writeSseEvent(subscriber, envelope);
+    if (!wrote) {
+      session.subscribers.delete(subscriber);
+    }
+  }
+};
+
+const getLoopCodePreview = async (sessionId: string): Promise<string> => {
+  const workspaceDir = path.join(TMP_ROOT, `${SESSION_DIR_PREFIX}${sessionId}`, 'workspace');
+  const candidatePaths = [path.join(workspaceDir, 'index.html'), path.join(workspaceDir, 'generated', 'index.html')];
+
+  for (const candidatePath of candidatePaths) {
+    try {
+      const content = await fs.readFile(candidatePath, 'utf8');
+      const normalized = content.replace(/\s+/g, ' ').trim();
+      if (normalized.length > 0) {
+        return normalized.slice(0, 200);
+      }
+    } catch {
+      // Continue fallback search.
+    }
+  }
+
+  try {
+    const outputLines = ralphProcessManager.getOutput(sessionId, 60);
+    const preview = outputLines.slice(-20).join('\n').trim();
+    return preview.slice(0, 200);
+  } catch {
+    return '';
+  }
+};
+
+const getLoopImageArtifact = async (sessionId: string, candidateFilenames: string[]): Promise<string | null> => {
+  const roots = [
+    path.join(TMP_ROOT, `${SESSION_DIR_PREFIX}${sessionId}`, 'workspace'),
+    path.join(TMP_ROOT, `${SESSION_DIR_PREFIX}${sessionId}`, 'workspace', 'ralph-runtime'),
+  ];
+
+  for (const root of roots) {
+    for (const candidateFilename of candidateFilenames) {
+      const candidatePath = path.join(root, candidateFilename);
+      try {
+        const stats = await fs.stat(candidatePath);
+        if (!stats.isFile()) {
+          continue;
+        }
+
+        const buffer = await fs.readFile(candidatePath);
+        return buffer.toString('base64');
+      } catch {
+        // Continue searching for the first available artifact.
+      }
+    }
+  }
+
+  return null;
+};
+
+const buildLoopStatusResponse = (sessionId: string): Record<string, unknown> => {
+  const session = loopSessions.get(sessionId);
+  if (!session) {
+    throw new ApiError(`Session '${sessionId}' not found`, 'LOOP_NOT_FOUND', 404);
+  }
+
+  const ralphStatus = getRalphStatusOrNull(sessionId);
+  const resolvedState = ralphStatus?.state ?? (session.completedAtMs ? 'completed' : 'failed');
+  const elapsedMs =
+    ralphStatus?.elapsedMs ??
+    (session.completedAtMs && session.startedAtMs ? session.completedAtMs - session.startedAtMs : Date.now() - session.startedAtMs);
+
+  return {
+    sessionId,
+    config: {
+      projectName: session.config.projectName,
+      maxIterations: session.config.maxIterations,
+      targetScore: session.config.targetScore,
+      githubUrl: session.config.githubUrl ?? null,
+    },
+    state: resolvedState,
+    currentIteration: ralphStatus?.currentIteration ?? session.bestIteration,
+    maxIterations: ralphStatus?.maxIterations ?? session.config.maxIterations,
+    lastScore: ralphStatus?.lastScore ?? session.lastIterationScore,
+    startedAt: ralphStatus?.startedAt ?? session.startedAtIso,
+    elapsedMs,
+    bestScore: session.bestScore,
+    bestIteration: session.bestIteration,
+    lastError: session.lastError,
+    analysis: session.analysis,
+    recentEvents: session.events.slice(-25),
+  };
+};
+
+type ManagerIterationStartEvent = {
+  sessionId: string;
+  iteration: number;
+  maxIterations: number;
+};
+
+type ManagerIterationCompleteEvent = {
+  sessionId: string;
+  iteration: number;
+  score: number | null;
+};
+
+type ManagerLoopCompleteEvent = {
+  sessionId: string;
+  totalIterations: number;
+  finalScore: number | null;
+};
+
+type ManagerLoopErrorEvent = {
+  sessionId: string;
+  error: string;
+  iteration: number;
+  lastScore: number | null;
+};
+
+ralphProcessManager.on('iteration-start', (payload: ManagerIterationStartEvent) => {
+  const session = loopSessions.get(payload.sessionId);
+  if (!session) {
+    return;
+  }
+
+  const status = getRalphStatusOrNull(payload.sessionId);
+  publishLoopEvent(payload.sessionId, 'iteration-start', {
+    iteration: payload.iteration,
+    maxIterations: payload.maxIterations,
+    elapsedMs: status?.elapsedMs ?? Date.now() - session.startedAtMs,
+  });
+});
+
+ralphProcessManager.on('iteration-complete', (payload: ManagerIterationCompleteEvent) => {
+  void (async () => {
+    const session = loopSessions.get(payload.sessionId);
+    if (!session) {
+      return;
+    }
+
+    const status = getRalphStatusOrNull(payload.sessionId);
+    const score = payload.score ?? status?.lastScore ?? null;
+    const iteration = Math.max(payload.iteration, status?.currentIteration ?? 0);
+    const dedupeKey = `${iteration}:${score ?? 'null'}`;
+    if (session.lastIterationEventKey === dedupeKey) {
+      return;
+    }
+
+    session.lastIterationEventKey = dedupeKey;
+
+    const previousScore = session.lastIterationScore;
+    const improvement = previousScore !== null && score !== null ? Number((score - previousScore).toFixed(2)) : null;
+    session.lastIterationScore = score;
+
+    if (score !== null && (session.bestScore === null || score > session.bestScore)) {
+      session.bestScore = score;
+      session.bestIteration = iteration;
+    }
+
+    const [codePreview, screenshotBase64, diffImageBase64] = await Promise.all([
+      getLoopCodePreview(payload.sessionId),
+      getLoopImageArtifact(payload.sessionId, ['latest.png', 'generated.png', 'screenshot.png', 'clone.png']),
+      getLoopImageArtifact(payload.sessionId, ['diff.png', 'pixel-diff.png', 'overlay.png']),
+    ]);
+
+    publishLoopEvent(payload.sessionId, 'iteration-complete', {
+      iteration,
+      maxIterations: status?.maxIterations ?? session.config.maxIterations,
+      score,
+      previousScore,
+      improvement,
+      screenshotBase64,
+      codePreview,
+      diffImageBase64,
+      commitUrl: null,
+      elapsedMs: status?.elapsedMs ?? Date.now() - session.startedAtMs,
+    });
+  })();
+});
+
+ralphProcessManager.on('loop-complete', (payload: ManagerLoopCompleteEvent) => {
+  const session = loopSessions.get(payload.sessionId);
+  if (!session) {
+    return;
+  }
+
+  const status = getRalphStatusOrNull(payload.sessionId);
+  const finalScore = payload.finalScore ?? status?.lastScore ?? session.lastIterationScore;
+  if (finalScore !== null && (session.bestScore === null || finalScore > session.bestScore)) {
+    session.bestScore = finalScore;
+    session.bestIteration = payload.totalIterations;
+  }
+
+  session.completedAtMs = Date.now();
+
+  publishLoopEvent(payload.sessionId, 'loop-complete', {
+    totalIterations: payload.totalIterations,
+    finalScore,
+    totalElapsedMs: status?.elapsedMs ?? session.completedAtMs - session.startedAtMs,
+    bestIteration: session.bestIteration,
+  });
+});
+
+ralphProcessManager.on('loop-error', (payload: ManagerLoopErrorEvent) => {
+  const session = loopSessions.get(payload.sessionId);
+  if (!session) {
+    return;
+  }
+
+  session.completedAtMs = Date.now();
+  session.lastError = payload.error;
+  if (payload.lastScore !== null) {
+    session.lastIterationScore = payload.lastScore;
+  }
+
+  publishLoopEvent(payload.sessionId, 'loop-error', {
+    error: payload.error,
+    iteration: payload.iteration,
+    lastScore: payload.lastScore,
+  });
+});
+
 app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const sessionId =
@@ -367,6 +763,143 @@ app.post('/api/compare', async (req: Request, res: Response, next: NextFunction)
       return;
     }
 
+    next(error);
+  }
+});
+
+app.post('/api/loop/start', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { sessionId, config } = parseLoopStartRequest(req.body);
+    const existingStatus = getRalphStatusOrNull(sessionId);
+
+    if (existingStatus && isLoopStateActive(existingStatus.state)) {
+      throw new ApiError(`Session '${sessionId}' is already running`, 'LOOP_ALREADY_RUNNING', 409);
+    }
+
+    const analysis = await analyzeSessionScreenshots({ sessionId });
+    const record = createLoopSessionRecord(sessionId, config, analysis);
+    const previousRecord = loopSessions.get(sessionId);
+    if (previousRecord) {
+      for (const subscriber of previousRecord.subscribers) {
+        record.subscribers.add(subscriber);
+      }
+    }
+    loopSessions.set(sessionId, record);
+    let status: RalphSessionStatus;
+    try {
+      status = await ralphProcessManager.start(sessionId, {
+        projectName: config.projectName,
+        maxIterations: config.maxIterations,
+        targetSimilarity: config.targetScore,
+        analysis,
+      });
+    } catch (error) {
+      loopSessions.delete(sessionId);
+      throw error;
+    }
+
+    res.status(202).json({
+      sessionId,
+      state: status.state,
+      currentIteration: status.currentIteration,
+      maxIterations: status.maxIterations,
+      targetScore: config.targetScore,
+      startedAt: status.startedAt,
+    });
+  } catch (error) {
+    if (error instanceof AnalysisError) {
+      const responseDetails = error.retryable ? { retryable: true, retryAfterSeconds: 10 } : undefined;
+      next(new ApiError(error.message, error.code as ApiErrorCode, error.status, responseDetails));
+      return;
+    }
+
+    if (error instanceof ApiError) {
+      next(error);
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : 'Unable to start loop';
+    next(new ApiError(message, 'LOOP_START_FAILED', 400));
+  }
+});
+
+app.get('/api/loop/:sessionId/events', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sessionId = parseLoopString(req.params.sessionId, 'sessionId', true);
+    const session = loopSessions.get(sessionId);
+    if (!session) {
+      throw new ApiError(`Session '${sessionId}' not found`, 'LOOP_NOT_FOUND', 404);
+    }
+
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    res.write(': connected\n\n');
+
+    session.subscribers.add(res);
+    for (const event of session.events) {
+      writeSseEvent(res, event);
+    }
+
+    const keepAlive = setInterval(() => {
+      try {
+        res.write(`: keepalive ${Date.now()}\n\n`);
+      } catch {
+        clearInterval(keepAlive);
+        session.subscribers.delete(res);
+      }
+    }, SSE_KEEPALIVE_MS);
+    keepAlive.unref();
+
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      session.subscribers.delete(res);
+      res.end();
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/loop/:sessionId/status', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sessionId = parseLoopString(req.params.sessionId, 'sessionId', true);
+    const statusPayload = buildLoopStatusResponse(sessionId);
+    res.status(200).json(statusPayload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/loop/:sessionId/stop', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sessionId = parseLoopString(req.params.sessionId, 'sessionId', true);
+    const session = loopSessions.get(sessionId);
+    if (!session) {
+      throw new ApiError(`Session '${sessionId}' not found`, 'LOOP_NOT_FOUND', 404);
+    }
+
+    const status = getRalphStatusOrNull(sessionId);
+    if (!status || !isLoopStateActive(status.state)) {
+      throw new ApiError(`Session '${sessionId}' is not running`, 'LOOP_NOT_RUNNING', 409);
+    }
+
+    const stopped = ralphProcessManager.stop(sessionId);
+    if (!stopped) {
+      throw new ApiError(`Session '${sessionId}' is not running`, 'LOOP_NOT_RUNNING', 409);
+    }
+
+    res.status(202).json({
+      sessionId,
+      state: 'stopping',
+      currentIteration: status.currentIteration,
+      maxIterations: status.maxIterations,
+      lastScore: status.lastScore,
+    });
+  } catch (error) {
     next(error);
   }
 });

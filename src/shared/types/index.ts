@@ -80,3 +80,54 @@ export interface CompareResponse {
   pixel?: PixelCompareResult;
   primaryScore: number;
 }
+
+export interface LoopStartConfig {
+  projectName: string;
+  maxIterations: number;
+  targetScore: number;
+  githubUrl?: string;
+  githubToken?: string;
+}
+
+export interface LoopStartRequest {
+  sessionId: string;
+  config: LoopStartConfig;
+}
+
+export interface LoopStartResponse {
+  sessionId: string;
+  state: string;
+  currentIteration: number;
+  maxIterations: number;
+  targetScore: number;
+  startedAt: string | null;
+}
+
+export type LoopEventName = 'iteration-start' | 'iteration-complete' | 'loop-complete' | 'loop-error';
+
+export interface LoopEventEnvelope {
+  id: number;
+  event: LoopEventName;
+  data: Record<string, unknown>;
+}
+
+export interface LoopStatusResponse {
+  sessionId: string;
+  config: {
+    projectName: string;
+    maxIterations: number;
+    targetScore: number;
+    githubUrl: string | null;
+  };
+  state: string;
+  currentIteration: number;
+  maxIterations: number;
+  lastScore: number | null;
+  startedAt: string | null;
+  elapsedMs: number;
+  bestScore: number | null;
+  bestIteration: number;
+  lastError: string | null;
+  analysis: AnalyzeResponse | null;
+  recentEvents: LoopEventEnvelope[];
+}

@@ -13,6 +13,7 @@
 - For multi-session Ralph orchestration, copy `scripts/ralph` into a per-session runtime (`/tmp/ralphton-{sessionId}/workspace/ralph-runtime`) so each process gets isolated `prd.json` and `progress.txt` files.
 - When API endpoints accept large JSON payloads, set an explicit `express.json({ limit })` and map `entity.too.large` errors to stable API codes instead of falling through to generic 500 responses.
 - For visual compare endpoints, normalize both original/generated images to the same PNG dimensions before running vision and pixel diff so both scoring signals evaluate identical geometry.
+- For SSE-backed loop sessions, keep a bounded per-session event buffer and replay it on connect so reconnecting clients recover missed timeline events.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -254,4 +255,22 @@
 - **Learnings for future iterations:**
   - Keep vision verdict evaluation and pixel diff evaluation on the same normalized image dimensions, otherwise combined scoring can drift.
   - For provider-backed comparison endpoints, enforce per-session rate limiting before outbound calls and cache by `(sessionId, iteration)` to avoid duplicate expensive verdict requests.
+---
+## 2026-02-28 14:40:48 UTC - US-009
+- Implemented loop orchestration endpoints on the backend: `POST /api/loop/start`, `GET /api/loop/:sessionId/events` (SSE), `GET /api/loop/:sessionId/status`, and `POST /api/loop/:sessionId/stop`.
+- Wired `RalphProcessManager` events (`iteration-start`, `iteration-complete`, `loop-complete`, `loop-error`) into per-session SSE broadcasting with keepalive comments every 15 seconds, multi-subscriber support, and bounded replay history for reconnecting clients.
+- Added loop session request validation and status shaping: start payload validation (`sessionId`, `config.projectName`, `config.maxIterations`, `config.targetScore`), internal analysis call before process start, and status payload including progress metrics, best score tracking, and recent event snapshots.
+- Added iteration event enrichment for timeline consumers: `previousScore`, `improvement`, `elapsedMs`, `codePreview` (first 200 chars), plus best-effort `screenshotBase64` and `diffImageBase64` artifact lookup from session workspace paths.
+- Extended shared API types with loop request/response and event envelope contracts.
+- Files changed: `src/server/index.ts`, `src/shared/types/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation: Not applicable (backend loop/SSE orchestration story, no UI layout changes).
+- **Learnings for future iterations:**
+  - Keep loop orchestration memory (`bestScore`, `bestIteration`, `previousScore`) in the API layer even when process lifecycle lives in a manager class, so SSE/status routes can remain deterministic across reconnects.
+  - When restarting a loop for an existing session ID, create the new session record before spawning and delete it on spawn failure to avoid stale status/SSE records.
 ---
