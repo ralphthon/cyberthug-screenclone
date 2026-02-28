@@ -281,19 +281,33 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     fi
   done
 
+  ITERATION_PROMPT_FILE="$(mktemp)"
+  cp "$RUNTIME_PROMPT_FILE" "$ITERATION_PROMPT_FILE"
+
+  if [ -n "${RALPH_FEEDBACK_FILE:-}" ] && [ -f "$RALPH_FEEDBACK_FILE" ]; then
+    {
+      echo ""
+      echo "## Iteration Feedback (Injected by ralph.sh)"
+      echo "Apply the following structured feedback before generating this iteration:"
+      cat "$RALPH_FEEDBACK_FILE"
+    } >> "$ITERATION_PROMPT_FILE"
+  fi
+
   # Run the selected tool with the ralph prompt
   if [[ "$TOOL" == "amp" ]]; then
-    OUTPUT=$(cat "$RUNTIME_PROMPT_FILE" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
+    OUTPUT=$(cat "$ITERATION_PROMPT_FILE" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
   elif [[ "$TOOL" == "claude" ]]; then
     # Claude Code: attach images as multimodal content via --image flags
-    OUTPUT=$(claude --dangerously-skip-permissions --print "${IMAGE_FLAGS[@]}" < "$RUNTIME_PROMPT_FILE" 2>&1 | tee /dev/stderr) || true
+    OUTPUT=$(claude --dangerously-skip-permissions --print "${IMAGE_FLAGS[@]}" < "$ITERATION_PROMPT_FILE" 2>&1 | tee /dev/stderr) || true
   elif [[ "$TOOL" == "codex" ]]; then
     # Codex CLI: pipe prompt via stdin (-) so -i flags don't consume it
-    OUTPUT=$(codex exec --dangerously-bypass-approvals-and-sandbox "${IMAGE_FLAGS[@]}" - < "$RUNTIME_PROMPT_FILE" 2>&1 | tee /dev/stderr) || true
+    OUTPUT=$(codex exec --dangerously-bypass-approvals-and-sandbox "${IMAGE_FLAGS[@]}" - < "$ITERATION_PROMPT_FILE" 2>&1 | tee /dev/stderr) || true
   elif [[ "$TOOL" == "omx" ]]; then
     # oh-my-codex: codex with OMX hooks + image attachments, prompt via stdin
-    OUTPUT=$(codex exec --dangerously-bypass-approvals-and-sandbox "${IMAGE_FLAGS[@]}" - < "$RUNTIME_PROMPT_FILE" 2>&1 | tee /dev/stderr) || true
+    OUTPUT=$(codex exec --dangerously-bypass-approvals-and-sandbox "${IMAGE_FLAGS[@]}" - < "$ITERATION_PROMPT_FILE" 2>&1 | tee /dev/stderr) || true
   fi
+
+  rm -f "$ITERATION_PROMPT_FILE"
 
   # Check for completion signal — validate against prd.json before trusting
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
