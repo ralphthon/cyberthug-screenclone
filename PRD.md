@@ -335,29 +335,34 @@ Integrate OpenWaifu's WebSocket client into the React frontend. Right-side panel
 
 ### Acceptance Criteria
 
-- [ ] Right-side panel (30% width) with 4 sections: OLV Settings (top), Live2D canvas, chat history, text input
-- [ ] OLV Settings section (collapsible with toggle):
-- [ ]   - Server URL input (default ws://localhost:12393/ws, configurable)
-- [ ]   - LLM Model dropdown (OpenAI GPT-4o, Claude 4 Sonnet, Gemini 3 Pro, Ollama local, custom)
+- [ ] Right-side panel (30% width) with 4 sections: OLV status bar (top), Live2D canvas, chat history, text input
+- [ ] OLV status bar (always visible, collapsed by default):
+- [ ]   - Shows connection status dot (green/yellow/red) + 'OLV Connected' text
+- [ ]   - Shows current model + voice as compact info ('Claude 4 Sonnet · Sohee')
+- [ ]   - ⚙️ expand button on right side to open settings drawer
+- [ ] OLV Settings drawer (hidden by default, slides open on ⚙️ click):
+- [ ]   - Server URL input (default ws://localhost:12393/ws)
+- [ ]   - LLM Model dropdown (GPT-4o, Claude 4 Sonnet, Gemini 3 Pro, Ollama local, Custom)
+- [ ]   - TTS Voice selector (Sohee default)
 - [ ]   - LLM API Key input (password field with show/hide toggle)
 - [ ]   - LLM Base URL input (for custom endpoints)
-- [ ]   - TTS Voice selector (Sohee default, with preview button)
-- [ ]   - Persona toggle (enable/disable custom persona prompt)
-- [ ]   - Connection test button — pings OLV WebSocket, shows green/red status
-- [ ]   - Save Settings button — persists to localStorage
+- [ ]   - 🔌 Test Connection button — pings OLV WebSocket, shows green/red status + ping ms
+- [ ]   - 💾 Save Settings button — persists to localStorage
+- [ ]   - ✕ close button to collapse drawer back
+- [ ]   - Slide animation (max-height transition, 300ms ease)
 - [ ]   - Settings auto-loaded from localStorage on mount
 - [ ] Live2D canvas renders WaifuClaw model via pixi-live2d-display or OpenWaifu's built-in renderer
 - [ ] WebSocket connects using configured server URL from settings
 - [ ] Handles WebSocket message types: text-input (send), audio-play-start (receive), display_text (receive), set-expression (receive)
 - [ ] Chat history shows conversation bubbles: user (right, primary) and Cloney (left, card color)
 - [ ] Cloney messages include emotion tags: [joy]→😊, [sadness]→😢, [surprise]→😲, [neutral]→😐
-- [ ] Connection status indicator: green (connected), yellow (connecting), red (disconnected)
+- [ ] Connection status indicator synced with status bar dot
 - [ ] Auto-reconnect on disconnect with exponential backoff (1s→30s max)
 - [ ] Panel collapsible via toggle button (saves state to localStorage)
 - [ ] When collapsed: floating Cloney avatar (64x64) in bottom-right with unread badge
 - [ ] Typecheck passes
 
-**Notes:** OLV settings map to conf.yaml fields: openai_compatible_llm.base_url, openai_compatible_llm.llm_api_key, openai_compatible_llm.model, qwen3_tts.voice. Settings saved to localStorage key: "ralphton-olv-config". On save, optionally POST to OLV /api/config to hot-reload without restart. Connection test: WebSocket open + close within 3s = success.
+**Notes:** OLV settings map to conf.yaml fields: openai_compatible_llm.base_url, openai_compatible_llm.llm_api_key, openai_compatible_llm.model, qwen3_tts.voice. Settings saved to localStorage key: "ralphton-olv-config". UI pattern: collapsed status bar by default, ⚙️ button opens slide-down drawer with full settings. See designs/mockup-v3-collapsed.png and mockup-v3-expanded.png for reference.
 
 ---
 
