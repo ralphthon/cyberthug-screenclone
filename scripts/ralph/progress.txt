@@ -16,6 +16,7 @@
 - For SSE-backed loop sessions, keep a bounded per-session event buffer and replay it on connect so reconnecting clients recover missed timeline events.
 - For SSE-driven timelines, dedupe replayed events by SSE `lastEventId` and combine with a 3s reconnect backoff so UI cards do not duplicate across disconnect/reconnect cycles.
 - For synchronized comparison panes, keep zoom/pan in one shared transform state and apply it across original/generated/diff canvases; set `touch-action: none` on the canvas to keep pointer drag interactions reliable.
+- For threshold-colored score trends in Recharts, derive a single ordered score dataset from iteration state and split it into low/mid/high data keys so each segment can be rendered with distinct colors while keeping one tooltip source.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -310,5 +311,23 @@
 - Image-analysis observation (UI story): Compared implementation behavior/structure against `designs/mockups/us011.png` and related supplied mocks; marked as **pass** for required US-011 controls and interactions. Automated browser screenshot diffing is not configured in this harness, so final pixel-perfect validation remains manual.
 - **Learnings for future iterations:**
   - Keep comparison interactions (`zoom`, `pan`, selected iteration) centralized in one state layer so mode switches do not desynchronize the image transforms.
-  - For slider compare UX, combine CSS clip-path blending with pointer-driven divider movement rather than only a range input to satisfy direct-manipulation requirements.
+- For slider compare UX, combine CSS clip-path blending with pointer-driven divider movement rather than only a range input to satisfy direct-manipulation requirements.
+---
+## 2026-02-28 15:38:14 UTC - US-012
+- Implemented a live similarity score chart sidebar using Recharts, wired directly to SSE-driven iteration state so new `iteration-complete` events animate into the chart in real time.
+- Added chart requirements: numeric X-axis by iteration, fixed Y-axis 0-100%, dashed target reference line with label, color-segmented score lines (<50 red, 50-80 yellow, >80 green), best-score marker with label, and hover tooltip with iteration, score, improvement, and elapsed time.
+- Added chart UX states: `No data` placeholder before first scored iteration and click-to-expand behavior (200px collapsed, 400px expanded).
+- Integrated the score chart into a responsive timeline sidebar layout while keeping the existing comparison workspace intact.
+- Added `recharts` dependency to frontend runtime dependencies.
+- Files changed: `src/client/src/App.tsx`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+  - `npm run typecheck` passed
+- Image-analysis observation (UI story): Compared the implemented chart/sidebar intent against supplied references (`designs/mockups/us010.png`, `designs/ralphton-mockup.png`, `designs/mockup-v3.png`) and marked this story as **pass** for required US-012 chart behaviors. Automated browser screenshot diffing is not configured in this harness, so final pixel-perfect verification remains manual.
+- **Learnings for future iterations:**
+  - Keep chart data derived from the existing iteration-card source of truth to avoid drift between timeline cards and chart values.
+  - Use chart-level click toggles plus explicit control buttons so expand/collapse remains discoverable on both desktop and touch devices.
 ---

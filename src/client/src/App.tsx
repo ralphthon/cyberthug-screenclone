@@ -1,4 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceDot,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3001';
 
@@ -74,6 +85,16 @@ type IterationCard = {
   commitUrl: string | null;
   elapsedMs: number | null;
   error: string | null;
+};
+
+type ScoreChartPoint = {
+  iteration: number;
+  score: number;
+  scoreLow: number | null;
+  scoreMid: number | null;
+  scoreHigh: number | null;
+  improvement: number | null;
+  elapsedMs: number | null;
 };
 
 type SharedPanPoint = {
@@ -185,6 +206,22 @@ function formatDelta(delta: number | null): string {
   return `${prefix}${delta.toFixed(2)}`;
 }
 
+function formatElapsedMs(elapsedMs: number | null): string {
+  if (elapsedMs === null || !Number.isFinite(elapsedMs) || elapsedMs < 0) {
+    return 'n/a';
+  }
+
+  const totalSeconds = Math.floor(elapsedMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+
+  return `${minutes}m ${seconds}s`;
+}
+
 function getScoreColorClass(score: number | null): string {
   if (score === null) {
     return 'text-slate-300';
@@ -275,6 +312,7 @@ function App(): JSX.Element {
   const [sliderPosition, setSliderPosition] = useState(50);
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState<SharedPanPoint>({ x: 0, y: 0 });
+  const [isScoreChartExpanded, setIsScoreChartExpanded] = useState(false);
 
   const previews = useMemo<PreviewItem[]>(
     () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -297,6 +335,53 @@ function App(): JSX.Element {
   const currentComparisonImage = toDataUrl(currentComparisonIteration?.screenshotBase64 ?? null);
   const selectedDiffImage = toDataUrl(currentComparisonIteration?.diffImageBase64 ?? null);
   const referencePreview = previews[0]?.url ?? null;
+  const targetScore = useMemo(() => {
+    const parsed = Number(cloneConfig.targetSimilarity);
+    if (!Number.isFinite(parsed)) {
+      return 90;
+    }
+    return clamp(parsed, 0, 100);
+  }, [cloneConfig.targetSimilarity]);
+
+  const scoreChartData = useMemo<ScoreChartPoint[]>(() => {
+    return [...Object.values(iterationCards)]
+      .sort((a, b) => a.iteration - b.iteration)
+      .filter((card): card is IterationCard & { score: number } => card.score !== null && Number.isFinite(card.score))
+      .map((card) => {
+        const score = clamp(card.score, 0, 100);
+        const improvement =
+          card.delta ??
+          (card.previousScore !== null && Number.isFinite(card.previousScore) ? score - card.previousScore : null);
+
+        return {
+          iteration: card.iteration,
+          score,
+          scoreLow: score < 50 ? score : null,
+          scoreMid: score >= 50 && score <= 80 ? score : null,
+          scoreHigh: score > 80 ? score : null,
+          improvement,
+          elapsedMs: card.elapsedMs,
+        };
+      });
+  }, [iterationCards]);
+
+  const bestScorePoint = useMemo<ScoreChartPoint | null>(() => {
+    if (scoreChartData.length === 0) {
+      return null;
+    }
+
+    return scoreChartData.reduce((best, point) => {
+      if (point.score > best.score) {
+        return point;
+      }
+
+      if (point.score === best.score && point.iteration > best.iteration) {
+        return point;
+      }
+
+      return best;
+    }, scoreChartData[0]);
+  }, [scoreChartData]);
 
   useEffect(() => {
     loopStatusRef.current = loopStatus;
@@ -862,6 +947,7 @@ function App(): JSX.Element {
     setSliderPosition(50);
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
+    setIsScoreChartExpanded(false);
     setIsCloneRunning(true);
 
     window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(cloneConfig));
@@ -1269,14 +1355,15 @@ function App(): JSX.Element {
           </section>
         </section>
 
-        <section className="mx-auto mt-8 w-full max-w-4xl rounded-2xl border border-slate-700 bg-card/70 p-5 shadow-lg shadow-black/20">
-          <div className="mb-4 flex items-center justify-between gap-3">
+        <section className="mx-auto mt-8 grid w-full max-w-6xl gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="rounded-2xl border border-slate-700 bg-card/70 p-5 shadow-lg shadow-black/20">
+            <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-2xl font-semibold text-slate-100">Iteration Timeline</h2>
             <p className="text-sm text-slate-400">
               {loopSessionId ? `Session ${loopSessionId}` : 'No active session'}{' '}
               {loopStatus === 'running' ? `(${connectionStatus})` : ''}
             </p>
-          </div>
+            </div>
 
           {loopStatus === 'complete' && loopSummary ? (
             <div className="success-banner relative mb-4 overflow-hidden rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-emerald-200">
@@ -1426,9 +1513,146 @@ function App(): JSX.Element {
               </div>
             )}
           </div>
+          </div>
+
+          <aside className="rounded-2xl border border-slate-700 bg-card/70 p-4 shadow-lg shadow-black/20">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-lg font-semibold text-slate-100">Score Progress</h3>
+              <button
+                type="button"
+                onClick={() => setIsScoreChartExpanded((previous) => !previous)}
+                className="rounded-md border border-indigo-400/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-semibold text-indigo-200 transition hover:bg-indigo-500/20"
+              >
+                {isScoreChartExpanded ? 'Collapse' : 'Expand'}
+              </button>
+            </div>
+
+            {scoreChartData.length === 0 ? (
+              <div className="grid h-[200px] place-items-center rounded-xl border border-dashed border-slate-700 bg-surface/50 px-4 text-center text-sm text-slate-400">
+                No data yet. Complete an iteration to plot score progression.
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsScoreChartExpanded((previous) => !previous)}
+                className="w-full rounded-xl border border-slate-700 bg-surface/60 p-2 text-left"
+                aria-label={isScoreChartExpanded ? 'Collapse score chart' : 'Expand score chart'}
+              >
+                <div className={`${isScoreChartExpanded ? 'h-[400px]' : 'h-[200px]'} w-full`}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={scoreChartData} margin={{ top: 18, right: 16, left: -10, bottom: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,0.22)" vertical={false} />
+                      <XAxis
+                        dataKey="iteration"
+                        type="number"
+                        domain={['dataMin', 'dataMax']}
+                        allowDecimals={false}
+                        tickLine={false}
+                        axisLine={{ stroke: 'rgba(148,163,184,0.35)' }}
+                        tick={{ fill: '#94a3b8', fontSize: 11 }}
+                      />
+                      <YAxis
+                        type="number"
+                        domain={[0, 100]}
+                        ticks={[0, 20, 40, 60, 80, 100]}
+                        tickLine={false}
+                        axisLine={{ stroke: 'rgba(148,163,184,0.35)' }}
+                        tick={{ fill: '#94a3b8', fontSize: 11 }}
+                        tickFormatter={(value: number) => `${value}%`}
+                        width={34}
+                      />
+                      <Tooltip
+                        cursor={{ stroke: 'rgba(129,140,248,0.35)', strokeWidth: 1 }}
+                        content={({ active, payload }) => {
+                          if (!active || !payload || payload.length === 0) {
+                            return null;
+                          }
+
+                          const rawPoint = payload[0]?.payload as ScoreChartPoint | undefined;
+                          if (!rawPoint) {
+                            return null;
+                          }
+
+                          return (
+                            <div className="rounded-lg border border-slate-700 bg-surface/95 px-3 py-2 text-xs text-slate-200 shadow-xl">
+                              <p className="font-semibold text-slate-100">Iteration #{rawPoint.iteration}</p>
+                              <p className={getScoreColorClass(rawPoint.score)}>Score: {rawPoint.score.toFixed(2)}%</p>
+                              <p className="text-slate-300">Improvement: {formatDelta(rawPoint.improvement)}</p>
+                              <p className="text-slate-300">Elapsed: {formatElapsedMs(rawPoint.elapsedMs)}</p>
+                            </div>
+                          );
+                        }}
+                      />
+                      <ReferenceLine
+                        y={targetScore}
+                        stroke="#f59e0b"
+                        strokeDasharray="6 4"
+                        ifOverflow="extendDomain"
+                        label={{
+                          value: `Target ${targetScore.toFixed(0)}%`,
+                          position: 'insideTopRight',
+                          fill: '#fbbf24',
+                          fontSize: 11,
+                        }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="scoreLow"
+                        stroke="#f87171"
+                        strokeWidth={2.5}
+                        dot={false}
+                        connectNulls={false}
+                        isAnimationActive
+                        animationDuration={300}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="scoreMid"
+                        stroke="#facc15"
+                        strokeWidth={2.5}
+                        dot={false}
+                        connectNulls={false}
+                        isAnimationActive
+                        animationDuration={300}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="scoreHigh"
+                        stroke="#34d399"
+                        strokeWidth={2.5}
+                        dot={false}
+                        connectNulls={false}
+                        activeDot={{ r: 4, fill: '#34d399', stroke: '#052e16', strokeWidth: 1 }}
+                        isAnimationActive
+                        animationDuration={300}
+                      />
+                      {bestScorePoint ? (
+                        <ReferenceDot
+                          x={bestScorePoint.iteration}
+                          y={bestScorePoint.score}
+                          r={6}
+                          fill="#22c55e"
+                          stroke="#ecfdf5"
+                          strokeWidth={1.5}
+                          ifOverflow="extendDomain"
+                          label={{
+                            value: `Best ${bestScorePoint.score.toFixed(1)}%`,
+                            position: 'top',
+                            fill: '#86efac',
+                            fontSize: 11,
+                            fontWeight: 600,
+                          }}
+                        />
+                      ) : null}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </button>
+            )}
+          </aside>
         </section>
 
-        <section className="mx-auto mt-8 w-full max-w-4xl rounded-2xl border border-slate-700 bg-card/70 p-5 shadow-lg shadow-black/20">
+        <section className="mx-auto mt-8 w-full max-w-6xl rounded-2xl border border-slate-700 bg-card/70 p-5 shadow-lg shadow-black/20">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-2xl font-semibold text-slate-100">
               Compare: Iteration #{currentComparisonIteration?.iteration ?? 'n/a'}
