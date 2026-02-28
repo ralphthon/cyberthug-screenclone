@@ -1,5 +1,6 @@
 ## Codebase Patterns
 - Use ESLint v9 flat config in `eslint.config.js`; `.eslintrc.*` is ignored.
+- Keep ESLint parser settings non-project-bound in this mixed workspace unless every TS file is covered by tsconfig references.
 - Keep client and server TypeScript configs separate (`src/client/tsconfig.json` and `src/server/tsconfig.json`) and validate both in `npm run typecheck`.
 - For image previews, keep canonical upload state as `File[]` and always revoke `URL.createObjectURL(...)` values in cleanup.
 - For numeric settings inputs, keep React state as strings for controlled fields and validate/coerce at submit time before persistence.
@@ -89,4 +90,23 @@
   - Keep progress tail offsets in bytes (`Buffer` slicing) instead of UTF-8 string indices to avoid multibyte truncation bugs.
   - Emit loop completion/failure events idempotently so stop + exit handlers do not double-publish terminal session events.
   - Treat runtime artifacts (`ralph.sh`, prompts, skills, per-session PRD/progress) as a copied per-session workspace to keep parallel clone sessions isolated.
+---
+## 2026-02-28 13:07:07 UTC - US-001
+- Rebuilt the initial ScreenClone scaffold with a Vite + React + TypeScript + Tailwind frontend and a TypeScript Express backend, plus shared types under `src/shared/types`.
+- Added required root scripts (`dev`, `server`, `dev:all`) and configured Tailwind dark mode (`class` strategy) with project colors (`primary`, `surface`, `card`).
+- Implemented backend CORS for `http://localhost:5173` and `GET /api/health` returning `{ status: 'ok', version: '1.0.0' }`.
+- Added baseline UI rendering `RalphTon` gradient text on dark `#1e1b2e` background.
+- Files changed: `package.json`, `package-lock.json`, `eslint.config.js`, `postcss.config.cjs`, `tailwind.config.ts`, `tsconfig.base.json`, `tsconfig.json`, `src/client/index.html`, `src/client/vite.config.ts`, `src/client/tsconfig.json`, `src/client/src/main.tsx`, `src/client/src/App.tsx`, `src/client/src/index.css`, `src/client/src/vite-env.d.ts`, `src/server/index.ts`, `src/server/tsconfig.json`, `src/shared/types/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+  - Startup probes passed (`timeout 15s npm run dev` exposed `http://localhost:5173`, `timeout 15s npm run server` exposed `http://localhost:3001`)
+- Image-analysis observation (UI story): Browser/image automation tools were not available in this harness, so mockup comparison against supplied reference images is pending manual verification.
+- **Learnings for future iterations:**
+  - Keep frontend/backend TS projects isolated and aggregate checks in root scripts (`build`, `typecheck`) to keep smoke checks predictable.
+  - ESLint v9 flat config works well here, but avoid project-service coupling unless every TS file in the workspace is included in referenced tsconfigs.
+  - Use timeout startup probes for long-running dev scripts to confirm port bindings without hanging iterations.
 ---
