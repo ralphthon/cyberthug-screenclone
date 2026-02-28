@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type OlvConnectionStatus = 'disconnected' | 'connecting' | 'connected';
-type EmotionTag = 'joy' | 'sadness' | 'surprise' | 'neutral';
+type EmotionTag = 'joy' | 'sadness' | 'surprise' | 'neutral' | 'fear';
 type ChatSender = 'user' | 'cloney' | 'system';
 type ConnectionTestState = 'idle' | 'testing' | 'success' | 'failure';
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -22,6 +22,7 @@ type ChatMessage = {
   sender: ChatSender;
   text: string;
   emotion: EmotionTag | null;
+  progressBadge: string | null;
   createdAt: number;
 };
 
@@ -98,7 +99,24 @@ const EMOTION_EMOJI: Record<EmotionTag, string> = {
   joy: '😊',
   sadness: '😢',
   surprise: '😲',
+  fear: '😨',
   neutral: '😐',
+};
+
+const EXPRESSION_INDEX: Record<EmotionTag, number> = {
+  joy: 6,
+  sadness: 9,
+  surprise: 7,
+  fear: 10,
+  neutral: 11,
+};
+
+const TTS_CHARACTERISTICS: Record<EmotionTag, { pitch: number; speed: number; breathing: string }> = {
+  joy: { pitch: 2, speed: 1.08, breathing: 'light' },
+  sadness: { pitch: -2, speed: 0.9, breathing: 'soft' },
+  surprise: { pitch: 4, speed: 1.12, breathing: 'sharp' },
+  fear: { pitch: 1, speed: 0.96, breathing: 'shaky' },
+  neutral: { pitch: 0, speed: 1, breathing: 'balanced' },
 };
 
 const DEFAULT_OLV_CONFIG: OlvConfig = {
@@ -117,6 +135,7 @@ const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
     sender: 'cloney',
     text: 'Hi, I am Cloney. Share screenshots and tell me what to clone.',
     emotion: 'joy',
+    progressBadge: null,
     createdAt: Date.now(),
   },
 ];
@@ -198,26 +217,38 @@ function detectBridgeIntent(input: string): BridgeIntent {
 
 function describeIterationComplete(score: number | null, previousScore: number | null): { text: string; emotion: EmotionTag } {
   if (score === null) {
-    return { text: '이번 반복 결과를 받았어. 다음 반복으로 더 맞춰볼게.', emotion: 'neutral' };
+    return { text: '조금씩 나아지고 있어. 기다려줘~', emotion: 'neutral' };
   }
 
   if (previousScore !== null && score < previousScore) {
-    return { text: `이번 점수는 ${score.toFixed(1)}%야. 살짝 내려갔지만 다시 끌어올릴게.`, emotion: 'sadness' };
+    return { text: '어... 이전보다 나빠졌어. 다시 시도해볼게.', emotion: 'fear' };
   }
 
-  if (score >= 90) {
-    return { text: `와 거의 똑같아! 현재 ${score.toFixed(1)}%야.`, emotion: 'surprise' };
+  if (score < 30) {
+    return { text: '음... 아직 많이 부족해. 더 열심히 해볼게.', emotion: 'sadness' };
   }
 
-  if (score >= 70) {
-    return { text: `오~ ${score.toFixed(1)}%까지 왔어. 거의 다 됐어!`, emotion: 'joy' };
+  if (score < 50) {
+    return { text: '조금씩 나아지고 있어. 기다려줘~', emotion: 'neutral' };
   }
 
-  if (score >= 50) {
-    return { text: `${score.toFixed(1)}%야. 점점 형태가 맞아가고 있어.`, emotion: 'neutral' };
+  if (score < 70) {
+    return { text: '오~ 점점 비슷해지고 있어!', emotion: 'joy' };
   }
 
-  return { text: `${score.toFixed(1)}%야. 아직 초기 단계라 더 다듬어볼게.`, emotion: 'sadness' };
+  if (score <= 90) {
+    return { text: '거의 다 왔어! 조금만 더!', emotion: 'joy' };
+  }
+
+  return { text: '와~! 거의 똑같아! 클론 완성이야! 🎉', emotion: 'surprise' };
+}
+
+function formatProgressBadge(score: number | null): string | null {
+  if (score === null) {
+    return null;
+  }
+
+  return `${score.toFixed(1)}%`;
 }
 
 function formatStatusSummary(summary: CloneyBridgeStatusSummary): string {
@@ -310,9 +341,9 @@ function parsePayload(raw: string): GenericPayload | null {
 }
 
 function extractEmotionTag(rawText: string): { emotion: EmotionTag | null; text: string } {
-  const match = rawText.match(/\[(joy|sadness|surprise|neutral)\]/i);
+  const match = rawText.match(/\[(joy|sadness|surprise|neutral|fear)\]/i);
   const emotion = (match?.[1]?.toLowerCase() as EmotionTag | undefined) ?? null;
-  const textWithoutTag = rawText.replace(/\[(joy|sadness|surprise|neutral)\]/gi, '').trim();
+  const textWithoutTag = rawText.replace(/\[(joy|sadness|surprise|neutral|fear)\]/gi, '').trim();
 
   return {
     emotion,
@@ -347,6 +378,8 @@ function getConnectionLabel(status: OlvConnectionStatus): string {
 function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const websocketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const celebrationResetTimerRef = useRef<number | null>(null);
+  const celebrationExpressionTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const manualCloseRef = useRef(false);
   const collapsedRef = useRef(false);
@@ -375,30 +408,11 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(INITIAL_CHAT_MESSAGES);
   const [chatInput, setChatInput] = useState('');
   const [currentExpression, setCurrentExpression] = useState('neutral');
+  const [isCelebrating, setIsCelebrating] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [iframeReachable, setIframeReachable] = useState(true);
   const [iframeReloadKey, setIframeReloadKey] = useState(0);
-
-  const appendMessage = useCallback((sender: ChatSender, text: string, emotion: EmotionTag | null) => {
-    const nextText = text.trim();
-    if (nextText.length === 0) {
-      return;
-    }
-
-    const nextMessage: ChatMessage = {
-      id: Date.now() + Math.floor(Math.random() * 1000),
-      sender,
-      text: nextText,
-      emotion,
-      createdAt: Date.now(),
-    };
-
-    setChatMessages((previous) => [...previous, nextMessage]);
-
-    if (sender === 'cloney' && collapsedRef.current) {
-      setUnreadCount((previous) => previous + 1);
-    }
-  }, []);
+  const [isVoiceMuted, setIsVoiceMuted] = useState(false);
 
   const postMessageToIframe = useCallback((payload: GenericPayload) => {
     const contentWindow = iframeRef.current?.contentWindow;
@@ -409,6 +423,153 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
     contentWindow.postMessage(payload, '*');
   }, []);
 
+  const broadcastExpression = useCallback(
+    (expressionIndex: number) => {
+      const expression = String(expressionIndex);
+      setCurrentExpression(expression);
+      postMessageToIframe({
+        type: 'set-expression',
+        expression,
+        expression_index: expressionIndex,
+      });
+
+      const ws = websocketRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: 'set-expression',
+            expression,
+            expression_index: expressionIndex,
+          }),
+        );
+      }
+    },
+    [postMessageToIframe],
+  );
+
+  const clearCelebrationTimers = useCallback(() => {
+    if (celebrationResetTimerRef.current !== null) {
+      window.clearTimeout(celebrationResetTimerRef.current);
+      celebrationResetTimerRef.current = null;
+    }
+
+    if (celebrationExpressionTimerRef.current !== null) {
+      window.clearInterval(celebrationExpressionTimerRef.current);
+      celebrationExpressionTimerRef.current = null;
+    }
+  }, []);
+
+  const triggerCelebration = useCallback(() => {
+    clearCelebrationTimers();
+    setIsCelebrating(true);
+
+    postMessageToIframe({
+      type: 'play-motion',
+      motion: 'celebrate',
+    });
+
+    const ws = websocketRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: 'play-motion',
+          motion: 'celebrate',
+        }),
+      );
+    }
+
+    let step = 0;
+    celebrationExpressionTimerRef.current = window.setInterval(() => {
+      step += 1;
+      broadcastExpression(step % 2 === 0 ? 3 : 6);
+      if (step >= 6 && celebrationExpressionTimerRef.current !== null) {
+        window.clearInterval(celebrationExpressionTimerRef.current);
+        celebrationExpressionTimerRef.current = null;
+      }
+    }, 420);
+
+    celebrationResetTimerRef.current = window.setTimeout(() => {
+      setIsCelebrating(false);
+      if (celebrationExpressionTimerRef.current !== null) {
+        window.clearInterval(celebrationExpressionTimerRef.current);
+        celebrationExpressionTimerRef.current = null;
+      }
+    }, 3200);
+  }, [broadcastExpression, clearCelebrationTimers, postMessageToIframe]);
+
+  const sendSystemSpeech = useCallback(
+    (text: string, emotion: EmotionTag | null) => {
+      const ws = websocketRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN || isVoiceMuted) {
+        return;
+      }
+
+      ws.send(
+        JSON.stringify({
+          type: 'text-input',
+          sender: 'system',
+          text,
+          emotion: emotion ? `[${emotion}]` : undefined,
+          voice_enabled: !isVoiceMuted,
+          tts: {
+            engine: 'qwen3',
+            voice: appliedConfig.ttsVoice,
+            max_sentences: 2,
+            characteristics: TTS_CHARACTERISTICS[emotion ?? 'neutral'],
+          },
+        }),
+      );
+    },
+    [appliedConfig.ttsVoice, isVoiceMuted],
+  );
+
+  const applyEmotionExpression = useCallback(
+    (emotion: EmotionTag) => {
+      const expressionIndex =
+        emotion === 'joy' ? (Date.now() % 2 === 0 ? 3 : 6) : EXPRESSION_INDEX[emotion];
+      broadcastExpression(expressionIndex);
+    },
+    [broadcastExpression],
+  );
+
+  const appendMessage = useCallback(
+    (
+      sender: ChatSender,
+      text: string,
+      emotion: EmotionTag | null,
+      options?: { progressBadge?: string | null; voice?: boolean },
+    ) => {
+    const nextText = text.trim();
+    if (nextText.length === 0) {
+      return;
+    }
+
+    const nextMessage: ChatMessage = {
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      sender,
+      text: nextText,
+      emotion,
+      progressBadge: options?.progressBadge ?? null,
+      createdAt: Date.now(),
+    };
+
+    setChatMessages((previous) => [...previous, nextMessage]);
+
+    if (sender === 'cloney' && emotion) {
+      applyEmotionExpression(emotion);
+    }
+
+    if (sender === 'cloney' && options?.voice !== false) {
+      sendSystemSpeech(nextText, emotion);
+    }
+
+    if (sender === 'cloney' && collapsedRef.current) {
+      setUnreadCount((previous) => previous + 1);
+    }
+  },
+    [applyEmotionExpression, sendSystemSpeech],
+  );
+
   const handleBridgePayload = useCallback(
     (payload: GenericPayload) => {
       const messageType = parseString(payload.type);
@@ -417,6 +578,10 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       }
 
       if (messageType === 'display_text') {
+        if (parseString(payload.sender) === 'system') {
+          return;
+        }
+
         const rawText =
           parseString(payload.text) ??
           parseString(payload.message) ??
@@ -490,11 +655,20 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
     if (storedCollapsed === 'true') {
       setIsPanelCollapsed(true);
     }
+
+    const storedVoiceMuted = window.localStorage.getItem('ralphton-cloney-voice-muted');
+    if (storedVoiceMuted === 'true') {
+      setIsVoiceMuted(true);
+    }
   }, []);
 
   useEffect(() => {
     window.localStorage.setItem(OLV_PANEL_COLLAPSED_STORAGE_KEY, String(isPanelCollapsed));
   }, [isPanelCollapsed]);
+
+  useEffect(() => {
+    window.localStorage.setItem('ralphton-cloney-voice-muted', String(isVoiceMuted));
+  }, [isVoiceMuted]);
 
   useEffect(() => {
     if (isPanelCollapsed) {
@@ -526,6 +700,12 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       window.removeEventListener('message', handleWindowMessage);
     };
   }, [handleBridgePayload]);
+
+  useEffect(() => {
+    return () => {
+      clearCelebrationTimers();
+    };
+  }, [clearCelebrationTimers]);
 
   useEffect(() => {
     manualCloseRef.current = false;
@@ -675,30 +855,31 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       return;
     }
 
-    if (loopEvent.event === 'iteration-complete') {
-      const score = parseNumber(loopEvent.payload.score);
-      const previousScore = parseNumber(loopEvent.payload.previousScore);
-      const delta = parseNumber(loopEvent.payload.improvement);
-      const { text, emotion } = describeIterationComplete(score, previousScore);
-      const deltaText = delta !== null ? ` (변화 ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}p)` : '';
-      appendMessage('cloney', `${text}${deltaText}`, emotion);
-      return;
-    }
+      if (loopEvent.event === 'iteration-complete') {
+        const score = parseNumber(loopEvent.payload.score);
+        const previousScore = parseNumber(loopEvent.payload.previousScore);
+        const { text, emotion } = describeIterationComplete(score, previousScore);
+        appendMessage('cloney', text, emotion, { progressBadge: formatProgressBadge(score) });
+        return;
+      }
 
-    if (loopEvent.event === 'loop-complete') {
-      const finalScore = parseNumber(loopEvent.payload.finalScore);
-      const bestIteration = parseNumber(loopEvent.payload.bestIteration);
-      const scoreText = finalScore !== null ? `${finalScore.toFixed(1)}%` : 'n/a';
-      const bestText = bestIteration !== null ? ` 최고 반복은 #${bestIteration}야.` : '';
-      appendMessage('cloney', `클론 완성했어! 최종 점수는 ${scoreText}야.${bestText}`, 'surprise');
-      return;
-    }
+      if (loopEvent.event === 'loop-complete') {
+        const finalScore = parseNumber(loopEvent.payload.finalScore);
+        const bestIteration = parseNumber(loopEvent.payload.bestIteration);
+        const scoreText = finalScore !== null ? `${finalScore.toFixed(1)}%` : 'n/a';
+        const bestText = bestIteration !== null ? ` 최고 반복은 #${bestIteration}야.` : '';
+        triggerCelebration();
+        appendMessage('cloney', `와~! 거의 똑같아! 클론 완성이야! 🎉 최종 점수 ${scoreText}.${bestText}`.trim(), 'surprise', {
+          progressBadge: finalScore !== null ? `${finalScore.toFixed(1)}% 완료` : null,
+        });
+        return;
+      }
 
-    if (loopEvent.event === 'loop-error') {
-      const errorText = parseString(loopEvent.payload.error) ?? '알 수 없는 오류가 발생했어.';
-      appendMessage('cloney', `문제가 생겼어. ${errorText} 다시 시도해볼까?`, 'sadness');
-    }
-  }, [appendMessage, bridge.latestLoopEvent, bridge.screencloneSessionId, mapSessionIdToOpenWaifu]);
+      if (loopEvent.event === 'loop-error') {
+        const errorText = parseString(loopEvent.payload.error) ?? '알 수 없는 오류가 발생했어.';
+        appendMessage('cloney', `문제가 생겼어. ${errorText} 다시 시도해볼까?`, 'fear');
+      }
+    }, [appendMessage, bridge.latestLoopEvent, bridge.screencloneSessionId, mapSessionIdToOpenWaifu, triggerCelebration]);
 
   const handleConfigChange = useCallback((field: keyof OlvConfig, value: string | boolean) => {
     setOlvConfig((previous) => ({
@@ -979,7 +1160,11 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   return (
     <aside className="mt-8 rounded-2xl border border-slate-700 bg-card/80 shadow-lg shadow-black/30 lg:fixed lg:bottom-4 lg:right-4 lg:top-4 lg:z-30 lg:mt-0 lg:w-[min(30vw,420px)] lg:min-w-[320px] lg:overflow-hidden">
       <div className="flex h-full flex-col">
-        <header className="border-b border-slate-700/80 px-4 py-3">
+        <header
+          className={`border-b border-slate-700/80 px-4 py-3 transition ${
+            isCelebrating ? 'bg-emerald-500/10' : ''
+          }`}
+        >
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
               <span className={`h-2.5 w-2.5 rounded-full ${connectionStatusClass}`} aria-hidden="true" />
@@ -1104,18 +1289,29 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
                 >
                   {connectionTestState === 'testing' ? 'Testing...' : 'Test Connection'}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleVoicePreview}
-                  className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/20"
-                >
-                  Preview Voice
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleSaveSettings();
-                  }}
+              <button
+                type="button"
+                onClick={handleVoicePreview}
+                className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/20"
+              >
+                Preview Voice
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsVoiceMuted((previous) => !previous)}
+                className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
+                  isVoiceMuted
+                    ? 'border border-slate-500/60 bg-slate-600/25 text-slate-100 hover:bg-slate-600/35'
+                    : 'border border-fuchsia-500/50 bg-fuchsia-500/15 text-fuchsia-100 hover:bg-fuchsia-500/25'
+                }`}
+              >
+                {isVoiceMuted ? 'Unmute Voice' : 'Mute Voice'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSaveSettings();
+                }}
                   disabled={saveState === 'saving'}
                   className="rounded-md border border-indigo-500/50 bg-indigo-500/20 px-2.5 py-1.5 text-xs font-semibold text-indigo-100 transition hover:bg-indigo-500/30 disabled:opacity-60"
                 >
@@ -1148,7 +1344,11 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
 
         <section className="border-b border-slate-700/70 px-4 py-3">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Live2D Canvas</h3>
-          <div className="relative h-48 overflow-hidden rounded-lg border border-slate-700 bg-surface/80">
+          <div
+            className={`relative h-48 overflow-hidden rounded-lg border bg-surface/80 transition ${
+              isCelebrating ? 'border-emerald-400/70 shadow-[0_0_18px_rgba(52,211,153,0.35)]' : 'border-slate-700'
+            }`}
+          >
             {iframeReachable ? (
               <iframe
                 key={iframeReloadKey}
@@ -1205,6 +1405,11 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
                     {message.sender === 'cloney' && message.emotion ? (
                       <p className="mb-1 text-[11px] text-slate-300">
                         {EMOTION_EMOJI[message.emotion]} {message.emotion}
+                      </p>
+                    ) : null}
+                    {message.sender === 'cloney' && message.progressBadge ? (
+                      <p className="mb-1 inline-flex rounded-full border border-indigo-400/40 bg-indigo-500/15 px-2 py-0.5 text-[11px] font-semibold text-indigo-200">
+                        {message.progressBadge}
                       </p>
                     ) : null}
                     <p className="leading-relaxed">{message.text}</p>

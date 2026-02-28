@@ -23,6 +23,7 @@
 - For OLV/WebSocket settings UIs, keep editable form state separate from the applied connection config and only reconnect on explicit save; also wrap `new WebSocket(...)` in `try/catch` for malformed URL handling.
 - For chat-command bridges in React, keep intent execution in the chat component but source action/state from a typed parent-provided bridge object so command parsing stays decoupled from loop orchestration internals.
 - For Cloney command bridging, keep ScreenClone API orchestration in `App.tsx` and pass typed bridge callbacks/event snapshots into `CloneyPanel` so intent parsing stays UI-local while loop state remains single-sourced from SSE.
+- For Cloney loop narration, centralize SSE-to-chat updates through one helper that both appends local chat bubbles and sends OpenWaifu `text-input` payloads with `sender: system`, emotion tags, and expression-index mapping.
 
 
 ## 2026-02-28 07:26:01 UTC - US-001
@@ -425,4 +426,22 @@
 - **Learnings for future iterations:**
   - When loop scoring is derived outside the child process, serialize iteration-complete handling per session so async render/compare work cannot race duplicate process events.
   - Persisting iteration screenshots/diff outputs immediately after evaluation keeps SSE payloads, compare views, and ZIP exports aligned to the same generated artifacts.
+---
+## 2026-02-28 17:42:23 UTC - US-018
+- Implemented Cloney emotion-driven progress narration updates in `CloneyPanel` with strict score-band Korean scripts, including regression handling (`fear`) and exact iteration-complete messaging thresholds.
+- Added OpenWaifu system narration bridge behavior for Cloney loop updates: cloney chat emissions now send `text-input` payloads with `sender: system`, emotion tags, max-2-sentence TTS metadata, and per-emotion characteristics (pitch/speed/breathing).
+- Added Live2D expression mapping and signaling for narration emotions with required indices (`joy` alternates `3|6`, `sadness` `9`, `surprise` `7`, `fear` `10`, `neutral` `11`), plus loop-complete celebration fallback animation (celebrate motion trigger + joy expression loop).
+- Added UI affordances for US-018: mute/unmute voice toggle (with local persistence) and styled progress badges in Cloney chat bubbles showing iteration score percentages.
+- Hardened chat bridge behavior to prevent duplicate echoed system display messages from the OLV channel.
+- Files changed: `src/client/src/components/CloneyPanel.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm run build` passed (non-failing Vite chunk-size warning)
+  - `npm test` passed (`No tests yet`)
+- Image-analysis observation (UI story): Compared behavior and visual intent against supplied references (`designs/mockups/us015.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this iteration as **pass** for US-018 interaction requirements; automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - Route loop-driven Cloney narration through one helper that updates local chat state and emits system-scoped WebSocket `text-input` payloads to keep chat text, TTS, and expressions synchronized.
+  - For celebratory/failure emotional UX, combine explicit `play-motion` intents with deterministic expression-index fallback loops so behavior still works when custom motions are unavailable.
 ---
