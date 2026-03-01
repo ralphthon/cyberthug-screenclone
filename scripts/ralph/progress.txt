@@ -1,10 +1,33 @@
 ## Codebase Patterns
 - Use ESLint v9 flat config in `eslint.config.js`; `.eslintrc.*` is ignored.
+- Keep ESLint parser settings non-project-bound in this mixed workspace unless every TS file is covered by tsconfig references.
 - Keep client and server TypeScript configs separate (`src/client/tsconfig.json` and `src/server/tsconfig.json`) and validate both in `npm run typecheck`.
 - For image previews, keep canonical upload state as `File[]` and always revoke `URL.createObjectURL(...)` values in cleanup.
+- For file picker flows, reset the hidden input value after handling `onChange` so re-selecting the same file still triggers an event.
 - For numeric settings inputs, keep React state as strings for controlled fields and validate/coerce at submit time before persistence.
+- For localStorage-backed forms, coerce parsed JSON through a typed sanitizer before hydrating state, and fall back to safe defaults for missing/invalid fields.
 - For server uploads, attach per-request session metadata to the Express request before Multer runs, and always clean up the session temp directory immediately on failed upload paths.
+- In TypeScript, Multer `diskStorage.destination` callbacks must still pass the second `destination` argument even on error paths to satisfy callback typing.
 - For long-running backend workers, isolate orchestration in a manager class (spawn + ring buffer + fs.watch progress parsing) and always wire server `SIGTERM`/`SIGINT` to graceful child-process shutdown.
+- For backend provider errors, never return raw upstream error bodies to clients; sanitize to status-level summaries to avoid accidental credential leakage.
+- For multi-session Ralph orchestration, copy `scripts/ralph` into a per-session runtime (`/tmp/ralphton-{sessionId}/workspace/ralph-runtime`) so each process gets isolated `prd.json` and `progress.txt` files.
+- For loop-owned evaluation feedback, tag orchestrator-written `progress.txt` entries (e.g., `[AUTO_EVAL]`) and ignore those tags in process-log parsers to avoid recursive `iteration-complete` event loops.
+- When API endpoints accept large JSON payloads, set an explicit `express.json({ limit })` and map `entity.too.large` errors to stable API codes instead of falling through to generic 500 responses.
+- For visual compare endpoints, normalize both original/generated images to the same PNG dimensions before running vision and pixel diff so both scoring signals evaluate identical geometry.
+- For SSE-backed loop sessions, keep a bounded per-session event buffer and replay it on connect so reconnecting clients recover missed timeline events.
+- For SSE-driven timelines, dedupe replayed events by SSE `lastEventId` and combine with a 3s reconnect backoff so UI cards do not duplicate across disconnect/reconnect cycles.
+- For synchronized comparison panes, keep zoom/pan in one shared transform state and apply it across original/generated/diff canvases; set `touch-action: none` on the canvas to keep pointer drag interactions reliable.
+- For threshold-colored score trends in Recharts, derive a single ordered score dataset from iteration state and split it into low/mid/high data keys so each segment can be rendered with distinct colors while keeping one tooltip source.
+- For GitHub auto-commit flows, serialize per-session commit work in a promise queue before calling `git.updateRef` so iteration/final commits do not race on the same branch head.
+- For binary export endpoints, serve both `HEAD` and `GET` from the same archive builder so the frontend can show accurate size estimates before downloading.
+- For OLV/WebSocket settings UIs, keep editable form state separate from the applied connection config and only reconnect on explicit save; also wrap `new WebSocket(...)` in `try/catch` for malformed URL handling.
+- For chat-command bridges in React, keep intent execution in the chat component but source action/state from a typed parent-provided bridge object so command parsing stays decoupled from loop orchestration internals.
+- For Cloney command bridging, keep ScreenClone API orchestration in `App.tsx` and pass typed bridge callbacks/event snapshots into `CloneyPanel` so intent parsing stays UI-local while loop state remains single-sourced from SSE.
+- For Cloney loop narration, centralize SSE-to-chat updates through one helper that both appends local chat bubbles and sends OpenWaifu `text-input` payloads with `sender: system`, emotion tags, and expression-index mapping.
+- For dual-theme retrofits, map Tailwind palette tokens (including `slate` shades) to CSS variables and set the initial `<html>` theme class in `index.html` before React mounts to avoid first-paint theme flash.
+- For backend runtime dependencies, fail fast during server startup with `fs.access(path, F_OK | X_OK)` checks and log an actionable setup command (`npm run setup`) when required scripts are missing.
+- For optional external services (like OpenWaifu WS), prefer non-fatal startup probes that log clear warnings and continue boot so local UI development is not blocked when that service is offline.
+
 
 ## 2026-02-28 07:26:01 UTC - US-001
 - Implemented initial ScreenClone scaffold with Vite + React + TypeScript + Tailwind frontend, Express backend, shared types, and root tooling/scripts.
@@ -89,4 +112,393 @@
   - Keep progress tail offsets in bytes (`Buffer` slicing) instead of UTF-8 string indices to avoid multibyte truncation bugs.
   - Emit loop completion/failure events idempotently so stop + exit handlers do not double-publish terminal session events.
   - Treat runtime artifacts (`ralph.sh`, prompts, skills, per-session PRD/progress) as a copied per-session workspace to keep parallel clone sessions isolated.
+---
+## 2026-02-28 13:07:07 UTC - US-001
+- Rebuilt the initial ScreenClone scaffold with a Vite + React + TypeScript + Tailwind frontend and a TypeScript Express backend, plus shared types under `src/shared/types`.
+- Added required root scripts (`dev`, `server`, `dev:all`) and configured Tailwind dark mode (`class` strategy) with project colors (`primary`, `surface`, `card`).
+- Implemented backend CORS for `http://localhost:5173` and `GET /api/health` returning `{ status: 'ok', version: '1.0.0' }`.
+- Added baseline UI rendering `RalphTon` gradient text on dark `#1e1b2e` background.
+- Files changed: `package.json`, `package-lock.json`, `eslint.config.js`, `postcss.config.cjs`, `tailwind.config.ts`, `tsconfig.base.json`, `tsconfig.json`, `src/client/index.html`, `src/client/vite.config.ts`, `src/client/tsconfig.json`, `src/client/src/main.tsx`, `src/client/src/App.tsx`, `src/client/src/index.css`, `src/client/src/vite-env.d.ts`, `src/server/index.ts`, `src/server/tsconfig.json`, `src/shared/types/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+  - Startup probes passed (`timeout 15s npm run dev` exposed `http://localhost:5173`, `timeout 15s npm run server` exposed `http://localhost:3001`)
+- Image-analysis observation (UI story): Browser/image automation tools were not available in this harness, so mockup comparison against supplied reference images is pending manual verification.
+- **Learnings for future iterations:**
+  - Keep frontend/backend TS projects isolated and aggregate checks in root scripts (`build`, `typecheck`) to keep smoke checks predictable.
+  - ESLint v9 flat config works well here, but avoid project-service coupling unless every TS file in the workspace is included in referenced tsconfigs.
+  - Use timeout startup probes for long-running dev scripts to confirm port bindings without hanging iterations.
+---
+## 2026-02-28 13:16:05 UTC - US-002
+- Implemented drag-and-drop screenshot upload UI on the main page with native drag events, click-to-browse fallback, and keyboard activation (Enter/Space) for accessibility.
+- Added upload validation for accepted MIME types (`image/png`, `image/jpeg`, `image/webp`), max 10MB/file, and max 5 total files; invalid inputs now surface toast-style error messages.
+- Added 5-slot thumbnail grid with per-image remove controls, drop-zone disable/re-enable behavior at max capacity, and `FormData` preparation from in-memory `File[]` state using `screenshots` field entries.
+- Files changed: `src/client/src/App.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implementation intent to `/designs/mockups/us002.png`; required uploader elements and dark styling are implemented, but automated browser screenshot diffing is not available in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - Keep upload pipeline state canonical as `File[]` and derive preview URLs and request `FormData` from that source-of-truth to avoid desynchronization.
+  - For transient toast UX in React, keep timer IDs in refs and clear them on unmount to avoid stale state updates.
+---
+## 2026-02-28 13:22:22 UTC - US-003
+- Implemented the clone session settings form below the uploader with dark card styling and required fields: project name, GitHub repo URL, GitHub token, max iterations, and target similarity.
+- Added localStorage persistence and hydration using key `ralphton-config`, plus typed coercion for stored values to safely prefill controlled inputs.
+- Added inline validation messages for project name (required), GitHub URL format, max iterations (integer >= 1), and target similarity (50-100).
+- Added GitHub token show/hide toggle icon control, and wired start-button disable logic to require both project name and at least one uploaded image.
+- Added clone-running state that disables the full form via `<fieldset disabled>` and opacity reduction after submit.
+- Files changed: `src/client/src/App.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics` passed for `src/client/src/App.tsx` (0 errors)
+  - `mcp lsp_diagnostics_directory` passed for project root (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implementation goals against `/designs/mockups/us003.png` and supplied references; required structure and controls are implemented, but automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - For persisted form state, coerce parsed localStorage payloads through a typed sanitizer before hydrating controlled inputs to avoid invalid stored shapes breaking form rendering.
+  - Keep field-level errors in a keyed object and clear only the edited field on change for predictable inline validation UX.
+---
+## 2026-02-28 13:30:40 UTC - US-004
+- Implemented the Express multipart upload API for `POST /api/upload` with Multer disk storage, request-scoped UUID session directories (`/tmp/ralphton-{sessionId}`), `screenshots` field handling, and JSON response payload `{ sessionId, files[] }`.
+- Enforced upload validation and limits: MIME allowlist (`image/png`, `image/jpeg`, `image/webp`), max 10MB per file, max 5 files, and no-files rejection.
+- Added robust server behavior: 24-hour stale temp directory cleanup via `setInterval`, immediate cleanup of failed upload sessions, and consistent JSON error format `{ error, code }` through centralized error middleware.
+- Files changed: `src/server/index.ts`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - Runtime API probes passed (`/api/health`, successful upload, no-files 400, invalid-type 400, too-many-files 400)
+- Image-analysis observation: Not applicable (backend API story, no UI changes).
+- **Learnings for future iterations:**
+  - Use module augmentation on `express-serve-static-core` `Request` for request-scoped upload metadata used by Multer destination callbacks.
+  - Always remove partially-created upload session directories on failed validation paths to keep `/tmp/ralphton-*` clean between periodic cleanup sweeps.
+---
+## 2026-02-28 13:50:24 UTC - US-005
+- Implemented `POST /api/analyze` with request validation for `{ sessionId, imageIndex? }`, 404 behavior for missing sessions, and typed JSON error responses for invalid requests and analysis failures.
+- Added a new backend analyzer module with session image discovery, base64 encoding, structured vision prompt generation, provider fallback flow (OpenAI -> Anthropic when both are configured), and a 60-second analysis timeout.
+- Added per-session analysis caching keyed by `sessionId` + `imageIndex` to prevent duplicate LLM calls for repeated requests in the same session context.
+- Implemented OpenAI/Anthropic response parsing and normalization into the required schema:
+  - `layout: { type, direction, sections[] }`
+  - `colorPalette: { primary, secondary, background, text, accent }`
+  - `components: [{ type, position, props[] }]`
+  - `textContent`, `fonts`, `responsiveHints`
+- Hardened failure-path security by sanitizing upstream provider errors to status-only details so response payloads never leak raw provider diagnostic bodies.
+- Files changed: `src/server/index.ts`, `src/server/visionAnalyzer.ts`, `src/shared/types/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed for project root (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+  - Runtime API probes passed for:
+    - `GET /api/health` -> 200
+    - `POST /api/analyze` with missing `sessionId` -> 400 `INVALID_REQUEST`
+    - `POST /api/analyze` with unknown `sessionId` -> 404 `SESSION_NOT_FOUND`
+    - `POST /api/analyze` with sample session and invalid provider keys -> 500 `ANALYSIS_FAILED` with retry metadata
+- Image-analysis observation: Not applicable (backend API story, no UI changes).
+- **Learnings for future iterations:**
+  - Keep vision model outputs normalized through a coercion layer before returning API responses so schema drift from providers does not break clients.
+  - Cache expensive per-session analysis by request key (`sessionId` + image selector) to keep reconnect/reload workflows fast and reduce duplicate provider usage.
+---
+## 2026-02-28 14:02:18 UTC - US-006
+- Implemented `RalphProcessManager` with required lifecycle APIs: `start(sessionId, config)`, `stop(sessionId)`, `getStatus(sessionId)`, and `getOutput(sessionId, lastN)`.
+- Added per-session runtime preparation that generates a session-specific `prd.json` from clone config + analysis data, seeds `progress.txt`, and spawns `ralph.sh --tool omx --images-dir <session-images-dir> <maxIterations>` from an isolated workspace.
+- Added child-process stdout/stderr ring buffer capture (last 500 lines), iteration parsing from `Ralph Iteration N of M`, completion detection from `<promise>COMPLETE</promise>`, failure detection from non-zero exits, and `fs.watch` incremental progress parsing that emits `iteration-complete` events.
+- Enforced session state machine transitions (`idle -> uploading -> analyzing -> cloning -> completed|failed`) and configurable max concurrency via `RALPH_MAX_SESSIONS` (default 3).
+- Wired server shutdown to call manager `shutdown()` so active child processes receive `SIGTERM` during `SIGINT`/`SIGTERM`.
+- Files changed: `src/server/ralphProcessManager.ts`, `src/server/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation: Not applicable (backend orchestration story, no UI changes).
+- **Learnings for future iterations:**
+  - Keep ralph runtime artifacts session-scoped (copied script + prompts + PRD/progress) to avoid cross-session state collisions when multiple loops run concurrently.
+  - Parse progress deltas using byte offsets after `fs.watch` events to avoid duplicate reads and retain deterministic event emission.
+---
+## 2026-02-28 14:11:01 UTC - US-007
+- Implemented a new Puppeteer-based render module (`src/server/renderService.ts`) with lazy singleton browser startup, per-request page lifecycle, request interception to block external network URLs, `<base href="about:blank/">` injection, default viewport `1536x1024`, default `waitMs=1000`, and base64 PNG screenshot output metadata.
+- Added `POST /api/render` in the backend with request parsing for `{ html, width?, height?, waitMs? }`, 30-second timeout/error mapping (`RENDER_TIMEOUT` -> 504), and stable API errors for browser availability and oversized HTML payloads.
+- Updated server shutdown flow to close both active Ralph sessions and the shared Puppeteer browser instance.
+- Updated shared API contracts with `RenderRequest` and `RenderResponse` types.
+- Files changed: `src/server/renderService.ts`, `src/server/index.ts`, `src/shared/types/index.ts`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+  - Runtime probes passed:
+    - `POST /api/render` returns `413 HTML_TOO_LARGE` for payloads >1MB.
+    - `POST /api/render` returns `503 BROWSER_UNAVAILABLE` in environments without a Chromium binary (expected fallback behavior).
+- Image-analysis observation: Not applicable (backend render API story; no frontend UI layout change in this iteration).
+- **Learnings for future iterations:**
+  - Keep heavy browser automation in a dedicated service module with lazy singleton browser init and per-request page teardown to prevent memory growth.
+  - Body parser limits can mask endpoint-specific validation; use an explicit JSON limit and map parser overflow to domain-consistent API error codes.
+  - Render endpoint depends on a system browser path; set `PUPPETEER_EXECUTABLE_PATH` in deployment environments without standard Chromium locations.
+---
+## 2026-02-28 14:24:00 UTC - US-008
+- Implemented dual visual comparison backend service (`compareService`) and new `POST /api/compare` route with modes `vision`, `pixel`, and `both` (default).
+- Added pixelmatch secondary scoring pipeline: base64 decode/validation, dimension normalization via sharp, pixel diff generation (`diffImage` base64 PNG), mismatch totals, and computed `pixelScore`.
+- Added vision-primary verdict pipeline with provider fallback (OpenAI -> Anthropic), 60s timeout, strict schema coercion, session-level 5s rate limiting, and per `(sessionId, iteration)` verdict cache.
+- Implemented pixel-only fallback behavior when vision provider calls fail, with `primaryScore` switching to pixel score.
+- Added progress feedback injection to per-session runtime logs when `sessionId` + `iteration` are supplied, appending `Visual Verdict` differences/suggestions blocks to `progress.txt`.
+- Extended shared API contracts with compare request/response and vision/pixel result types.
+- Files changed: `src/server/compareService.ts`, `src/server/index.ts`, `src/shared/types/index.ts`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+  - Runtime service probe passed via `npx tsx` (`both` mode pixel fallback without provider keys, `pixel` mode scoring, invalid base64 -> `INVALID_IMAGE_BASE64` 400)
+- Image-analysis observation: Not applicable (backend comparison API story, no frontend UI layout change in this iteration).
+- **Learnings for future iterations:**
+  - Keep vision verdict evaluation and pixel diff evaluation on the same normalized image dimensions, otherwise combined scoring can drift.
+  - For provider-backed comparison endpoints, enforce per-session rate limiting before outbound calls and cache by `(sessionId, iteration)` to avoid duplicate expensive verdict requests.
+---
+## 2026-02-28 14:40:48 UTC - US-009
+- Implemented loop orchestration endpoints on the backend: `POST /api/loop/start`, `GET /api/loop/:sessionId/events` (SSE), `GET /api/loop/:sessionId/status`, and `POST /api/loop/:sessionId/stop`.
+- Wired `RalphProcessManager` events (`iteration-start`, `iteration-complete`, `loop-complete`, `loop-error`) into per-session SSE broadcasting with keepalive comments every 15 seconds, multi-subscriber support, and bounded replay history for reconnecting clients.
+- Added loop session request validation and status shaping: start payload validation (`sessionId`, `config.projectName`, `config.maxIterations`, `config.targetScore`), internal analysis call before process start, and status payload including progress metrics, best score tracking, and recent event snapshots.
+- Added iteration event enrichment for timeline consumers: `previousScore`, `improvement`, `elapsedMs`, `codePreview` (first 200 chars), plus best-effort `screenshotBase64` and `diffImageBase64` artifact lookup from session workspace paths.
+- Extended shared API types with loop request/response and event envelope contracts.
+- Files changed: `src/server/index.ts`, `src/shared/types/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation: Not applicable (backend loop/SSE orchestration story, no UI layout changes).
+- **Learnings for future iterations:**
+  - Keep loop orchestration memory (`bestScore`, `bestIteration`, `previousScore`) in the API layer even when process lifecycle lives in a manager class, so SSE/status routes can remain deterministic across reconnects.
+  - When restarting a loop for an existing session ID, create the new session record before spawning and delete it on spawn failure to avoid stale status/SSE records.
+---
+## 2026-02-28 15:00:13 UTC - US-010
+- Implemented the live iteration timeline UI in the frontend with SSE-backed real-time updates, newest-first vertical cards, and upload->loop-start integration (`/api/upload` then `/api/loop/start`).
+- Added timeline card behaviors required by the story: 120x80 thumbnail, large bold iteration number, score + exact color thresholds (`text-red-400`, `text-yellow-400`, `text-green-400`), delta display, one-line feedback snippet, running-card pulse, and slide-in card animation.
+- Added expandable card details with full screenshot, diff overlay view, code preview block, and commit link rendering when available.
+- Added completion/error UX states: confetti-style success banner on complete, error banner with retry action on loop-error, and empty-state spinner (`Waiting for first iteration update...`).
+- Added reconnect-safe SSE client behavior with 3-second retry and `lastEventId` dedupe, plus intersection-observer auto-scroll behavior that only snaps to newest when the user remains at the newest anchor.
+- Files changed: `src/client/src/App.tsx`, `src/client/src/index.css`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implementation intent/structure against provided references (`designs/mockups/us010.png`, `designs/mockup-v3.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this iteration as **pass** for required US-010 interactions/components; automated browser screenshot diffing is not configured in this harness, so final pixel-perfect verification remains manual.
+- **Learnings for future iterations:**
+  - Timeline cards should be keyed by iteration number and merged via upsert to handle `iteration-start` then `iteration-complete` event sequences without duplicate entries.
+  - Keep loop event parsing defensive (`number|string` coercion) because SSE payload fields can vary by source and reconnection replay.
+  - Separate loop runtime status (`running|complete|error`) from transport status (`connected|reconnecting`) to keep UI state transitions clear during SSE interruptions.
+---
+## 2026-02-28 15:22:56 UTC - US-011
+- Implemented the side-by-side comparison workspace for iteration outputs with three modes: `Side-by-Side`, `Slider`, and `Diff Overlay`.
+- Added an iteration dropdown (defaulting to latest available iteration), keyboard navigation (`ArrowLeft`/`ArrowRight`) to move between iterations, and `Space` to toggle diff overlay mode.
+- Added synchronized compare interactions across all modes: shared zoom state (mouse wheel) and shared pan state (drag while zoomed) applied to original, generated, and diff imagery.
+- Added slider mode with clip-path blending and a draggable vertical divider handle plus percentage indicator.
+- Added similarity score UI with red-to-green gradient progress bar and decimal score display.
+- Files changed: `src/client/src/App.tsx`, `src/client/src/index.css`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics` passed for `src/client/src/App.tsx` (0 errors)
+  - `mcp lsp_diagnostics_directory` passed for project root (0 errors)
+  - `npm run lint` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implementation behavior/structure against `designs/mockups/us011.png` and related supplied mocks; marked as **pass** for required US-011 controls and interactions. Automated browser screenshot diffing is not configured in this harness, so final pixel-perfect validation remains manual.
+- **Learnings for future iterations:**
+  - Keep comparison interactions (`zoom`, `pan`, selected iteration) centralized in one state layer so mode switches do not desynchronize the image transforms.
+- For slider compare UX, combine CSS clip-path blending with pointer-driven divider movement rather than only a range input to satisfy direct-manipulation requirements.
+---
+## 2026-02-28 15:38:14 UTC - US-012
+- Implemented a live similarity score chart sidebar using Recharts, wired directly to SSE-driven iteration state so new `iteration-complete` events animate into the chart in real time.
+- Added chart requirements: numeric X-axis by iteration, fixed Y-axis 0-100%, dashed target reference line with label, color-segmented score lines (<50 red, 50-80 yellow, >80 green), best-score marker with label, and hover tooltip with iteration, score, improvement, and elapsed time.
+- Added chart UX states: `No data` placeholder before first scored iteration and click-to-expand behavior (200px collapsed, 400px expanded).
+- Integrated the score chart into a responsive timeline sidebar layout while keeping the existing comparison workspace intact.
+- Added `recharts` dependency to frontend runtime dependencies.
+- Files changed: `src/client/src/App.tsx`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+  - `npm run typecheck` passed
+- Image-analysis observation (UI story): Compared the implemented chart/sidebar intent against supplied references (`designs/mockups/us010.png`, `designs/ralphton-mockup.png`, `designs/mockup-v3.png`) and marked this story as **pass** for required US-012 chart behaviors. Automated browser screenshot diffing is not configured in this harness, so final pixel-perfect verification remains manual.
+- **Learnings for future iterations:**
+  - Keep chart data derived from the existing iteration-card source of truth to avoid drift between timeline cards and chart values.
+  - Use chart-level click toggles plus explicit control buttons so expand/collapse remains discoverable on both desktop and touch devices.
+---
+## 2026-02-28 15:58:25 UTC - US-013
+- Implemented GitHub auto-commit integration for improving loop iterations using Octokit Git Data APIs (`createTree` + `createCommit` + `updateRef`) with a dedicated backend service.
+- Added loop-start GitHub validation: when `githubUrl`/`githubToken` are provided, the backend now validates token auth (`GET /user`), validates repository access, initializes branch metadata (`ralph/clone-{projectName}-{timestamp}`), and returns API errors (`401` for invalid token) before the clone loop starts.
+- Wired iteration auto-commit behavior into SSE flow: only iterations that beat the previous best score trigger commit attempts, commit artifacts include `index.html`, `styles.css`, `script.js`, and generated `README.md` score history, and successful commit URLs now populate `iteration-complete` event `commitUrl`.
+- Added final summary commit behavior on loop completion using `[final]` commit message prefix, while keeping all GitHub failures non-blocking (warnings logged, loop continues/completes).
+- Files changed: `src/server/githubCommitService.ts`, `src/server/index.ts`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run typecheck` passed
+  - `npm run lint` passed
+  - `npm run build` passed
+  - `npm test` passed (`No tests yet`)
+- Image-analysis observation: Not applicable (backend GitHub automation story, no UI layout changes).
+- **Learnings for future iterations:**
+  - For optional external integrations, validate paired config fields together (`githubUrl` + `githubToken`) and fail fast before expensive analysis/spawn work.
+  - Generate README score history from a dedicated in-memory session ledger so every commit (including `[final]`) carries a coherent iteration trail.
+---
+## 2026-02-28 16:14:22 UTC - US-014
+- Implemented ZIP export support for completed loop sessions with new backend download endpoint `GET /api/loop/:sessionId/download` plus `HEAD` metadata support for filename/size estimation.
+- Added in-memory archive generation using `jszip`; archive now includes `index.html`, `styles.css`, `script.js`, `README.md`, `originals/` uploaded reference images, and `iterations/` top-3 scored iteration screenshots.
+- Added export README generation with required metadata: project name, final score, total iterations, export timestamp, embedded original screenshot as base64 data URI, and score history table with commit links when available.
+- Added frontend header-bar download UX: when loop state is complete, UI shows `📦 Download ZIP` button with file size estimate and triggers archive download.
+- Files changed: `src/server/index.ts`, `src/client/src/App.tsx`, `package.json`, `package-lock.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `mcp lsp_diagnostics` passed for `src/server/index.ts` (0 errors)
+  - `mcp lsp_diagnostics` passed for `src/client/src/App.tsx` (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implementation intent against supplied mockups (`designs/mockup-v3.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this story as **pass** for required header-level download action visibility on completion; automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - For downloadable session artifacts, generate ZIPs from the same canonical session sources used by loop state (`iterationHistory`, SSE event payload screenshots, and workspace generated files) to avoid export/view drift.
+  - Supporting `HEAD` on download endpoints provides a clean way for frontend controls to show accurate size estimates before triggering binary downloads.
+---
+## 2026-02-28 16:33:46 UTC - US-015
+- Implemented the OpenWaifu/OLV right-side Cloney panel integration with four sections: collapsible OLV settings, Live2D canvas host, chat history bubbles, and message input/send controls.
+- Added persisted OLV settings (`ralphton-olv-config`) with auto-hydration on mount, save flow, server URL/model/API key/base URL/voice/persona controls, connection test flow, and optional config sync to OLV `/api/config`.
+- Added WebSocket client bridge using configured server URL with connection status indicator, required message handling (`display_text`, `audio-play-start`, `set-expression`), outbound `text-input` messages, and exponential reconnect backoff (`1s` to `30s`).
+- Added panel collapse persistence (`ralphton-olv-panel-collapsed`) and collapsed floating Cloney avatar (64x64) with unread badge behavior.
+- Aligned default WebSocket URL to `ws://localhost:12393/ws` and hardened connection-test URL handling with safe `WebSocket` constructor error fallback.
+- Files changed: `src/client/src/App.tsx`, `src/client/src/components/CloneyPanel.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implemented panel structure/interactions against supplied references (`designs/mockups/us015.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this iteration as **pass** for required US-015 feature coverage and layout intent; automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+- For configurable realtime bridges, use a local draft config and a separately applied config to avoid reconnect storms while users type.
+- WebSocket connection-test handlers should catch constructor errors explicitly because malformed URLs throw before async event callbacks.
+---
+## 2026-02-28 17:03:22 UTC - US-016
+- Implemented Cloney conversation-to-ScreenClone action bridge in the frontend by wiring typed bridge props from `App.tsx` into `CloneyPanel` and mapping chat intents to loop actions.
+- Added intent detection for `clone|클론|copy|복사|make this|만들어`, `stop|멈춰`, `status|어디까지 했어`, and `compare|비교`; clone intent now starts the loop through the bridge, stop intent calls backend loop stop, status intent fetches `/api/loop/:sessionId/status`, and compare intent reports the latest available score.
+- Added image paste handling on Cloney chat input: pasted image files are forwarded into the uploader state through the shared bridge (`addPastedImages`) with accepted/rejected acknowledgements in chat.
+- Added OpenWaifu session-to-ScreenClone session mapping within Cloney panel state and wired SSE loop events from App (`iteration-start`, `iteration-complete`, `loop-complete`, `loop-error`) into natural Korean progress responses with score-aware emotion tags.
+- Extended OLV persona/tool instructions injection by sending `persona_prompt` through both OLV config sync payload and WebSocket connect-time message when persona mode is enabled.
+- Files changed: `src/client/src/App.tsx`, `src/client/src/components/CloneyPanel.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+- Image-analysis observation (UI story): Compared bridge behavior and panel interactions against supplied references (`designs/mockups/us015.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this iteration as **pass** for US-016 interaction requirements; automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - For conversational command bridges, keep the loop SSE event object in app-level state and pass it down as a typed prop so chat-side narration can react without duplicating transport logic.
+  - Clipboard image ingestion in chat should route through the same upload validator used by drop/browse flows to keep MIME/size/slot constraints consistent.
+---
+## 2026-02-28 17:22:40 UTC - US-017
+- Implemented backend auto-evaluation wiring for each Ralph iteration: the loop now extracts generated HTML from session workspace outputs, renders it with the Puppeteer render service, compares it to the uploaded original screenshot, and uses that evaluated score as the primary iteration score for SSE/status/history.
+- Added loop-safe feedback injection to runtime `progress.txt` with `[AUTO_EVAL]` entries that include primary score, vision differences/suggestions when available, pixel mismatch summary, and explicit render/compare error logging so failed renders do not stop the loop.
+- Added per-session iteration processing safeguards in loop state (`iterationEventQueue`, `autoEvaluatedIterations`, `autoEvaluationScores`) to ensure one auto-evaluation per iteration and stable deduped event emission/commit behavior.
+- Persisted evaluated iteration artifacts to session workspace (`latest.png`, `generated.png`, `diff.png`, and iteration-specific images) so timeline and compare UI consumers can load generated/diff previews consistently.
+- Added parser protection in `RalphProcessManager` to ignore `[AUTO_EVAL]` chunks while tailing `progress.txt`, preventing orchestrator-written feedback from recursively triggering new `iteration-complete` events.
+- Files changed: `src/server/index.ts`, `src/server/ralphProcessManager.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed (warnings only: Vite CJS deprecation + client chunk size advisory)
+- Image-analysis observation: Not applicable (backend orchestration story, no direct UI layout changes in this iteration).
+- **Learnings for future iterations:**
+  - When loop scoring is derived outside the child process, serialize iteration-complete handling per session so async render/compare work cannot race duplicate process events.
+  - Persisting iteration screenshots/diff outputs immediately after evaluation keeps SSE payloads, compare views, and ZIP exports aligned to the same generated artifacts.
+---
+## 2026-02-28 17:42:23 UTC - US-018
+- Implemented Cloney emotion-driven progress narration updates in `CloneyPanel` with strict score-band Korean scripts, including regression handling (`fear`) and exact iteration-complete messaging thresholds.
+- Added OpenWaifu system narration bridge behavior for Cloney loop updates: cloney chat emissions now send `text-input` payloads with `sender: system`, emotion tags, max-2-sentence TTS metadata, and per-emotion characteristics (pitch/speed/breathing).
+- Added Live2D expression mapping and signaling for narration emotions with required indices (`joy` alternates `3|6`, `sadness` `9`, `surprise` `7`, `fear` `10`, `neutral` `11`), plus loop-complete celebration fallback animation (celebrate motion trigger + joy expression loop).
+- Added UI affordances for US-018: mute/unmute voice toggle (with local persistence) and styled progress badges in Cloney chat bubbles showing iteration score percentages.
+- Hardened chat bridge behavior to prevent duplicate echoed system display messages from the OLV channel.
+- Files changed: `src/client/src/components/CloneyPanel.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm run build` passed (non-failing Vite chunk-size warning)
+  - `npm test` passed (`No tests yet`)
+- Image-analysis observation (UI story): Compared behavior and visual intent against supplied references (`designs/mockups/us015.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`) and marked this iteration as **pass** for US-018 interaction requirements; automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - Route loop-driven Cloney narration through one helper that updates local chat state and emits system-scoped WebSocket `text-input` payloads to keep chat text, TTS, and expressions synchronized.
+  - For celebratory/failure emotional UX, combine explicit `play-motion` intents with deterministic expression-index fallback loops so behavior still works when custom motions are unavailable.
+---
+## 2026-02-28 17:59:30 UTC - US-019
+- Implemented full theme/polish pass for the frontend: pre-hydration theme bootstrap in `index.html`, persisted dark/light toggle in navbar, and CSS-variable-driven dual theme tokens across app surfaces/text/borders.
+- Updated navbar composition to include active project chip, running score badge, theme toggle (moon/sun), and retained completion download action.
+- Added timeline polish for loading states: skeleton timeline cards while first iteration is being generated and inline spinner indicator on the active iteration row.
+- Added responsive behavior updates: score sidebar now collapses below `1024px` while timeline remains full-width, and Cloney panel auto-collapses into floating avatar mode on compact viewports.
+- Added graceful UI crash handling with a new React error boundary fallback screen and integrated custom RalphTon favicon.
+- Added theme-safe chart color rendering by binding Recharts axis/grid/target/tooltip colors to theme variables.
+- Added page title updates while loop is running: `RalphTon — {score}% | {projectName}`.
+- Files changed: `src/client/index.html`, `src/client/public/favicon.svg`, `src/client/src/index.css`, `tailwind.config.ts`, `src/client/src/App.tsx`, `src/client/src/components/CloneyPanel.tsx`, `src/client/src/components/ErrorBoundary.tsx`, `src/client/src/main.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `npm run build` passed
+- Image-analysis observation (UI story): Compared implemented structure/states against supplied references (`designs/mockup-v3.png`, `designs/mockup-v3-expanded.png`, `designs/mockup-v3-collapsed.png`, `designs/mockups/us015.png`) and marked this iteration as **pass** for required US-019 features (theme toggle, responsive collapse behavior, nav composition, polished loading states). Automated browser screenshot diffing is not configured in this harness, so final pixel-level verification remains manual.
+- **Learnings for future iterations:**
+  - For reliable no-flash theming in Vite React apps, set `<html>` theme class from a tiny `index.html` bootstrap script before React mounts, then keep React/localStorage in sync.
+  - Mapping Tailwind color tokens (including `slate` shades) to CSS variables is an effective low-churn way to retrofit full light/dark support across an existing dark-first UI.
+---
+## 2026-02-28 18:13:43 UTC - US-020
+- Updated setup/install flow for `ralph-image-analysis`: `setup.sh` now enforces dependency presence, verifies `deps/ralph-image-analysis/ralph.sh` is executable, installs dependency npm packages when present, and syncs the `visual-verdict` skill into `scripts/ralph/skills/` when needed.
+- Added package script wiring so setup is runnable via `npm run setup`, and updated README setup docs/troubleshooting to reflect the dependency checks and skill sync behavior.
+- Added backend startup preflight in `src/server/index.ts` to fail fast with a clear error if `scripts/ralph/ralph.sh` is missing or not executable.
+- Files changed: `setup.sh`, `package.json`, `README.md`, `src/server/index.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+- Image-analysis observation: Not applicable (setup/backend story, no UI visual changes required for this iteration).
+- **Learnings for future iterations:**
+  - Keep setup scripts repo-root-aware (`cd` to script directory first) so they behave consistently from any invocation path, including containers and CI shells.
+  - Syncing runtime skills from dependency source (`deps/ralph-image-analysis/skills/...`) into `scripts/ralph/skills/...` avoids silent drift between local runtime assets and dependency updates.
+---
+## 2026-02-28 18:27:34 UTC - US-021
+- Extended setup automation for OpenWaifu/Open-LLM-VTuber in `setup.sh`: added staged execution (`full`/`waifu`), non-interactive clone-if-missing behavior, configurable `OLV_PATH` (default `./deps/Open-LLM-VTuber`), OpenWaifu installer execution, and post-install artifact verification (`conf.yaml`, `model_dict.json`, `live2d-models/WaifuClaw`, `src/open_llm_vtuber/tts/qwen3_tts.py`).
+- Added `setup:waifu` script in `package.json` and updated `README.md` to document OpenWaifu setup flow, `DASHSCOPE_API_KEY`, `OPENWAIFU_WS_URL` default, and `OLV_PATH` behavior.
+- Added OpenWaifu WebSocket reachability checks at startup:
+  - Backend now performs a non-fatal TCP probe from `OPENWAIFU_WS_URL` (default `ws://localhost:12393/ws`) and logs warnings if unreachable/invalid.
+  - Frontend `CloneyPanel` now emits a one-time startup/reconnect warning in console when OLV endpoint is unreachable, while preserving existing reconnect behavior.
+- Verified `.gitignore` already includes `deps/OpenWaifu/` and `deps/Open-LLM-VTuber/` exclusions.
+- Files changed: `setup.sh`, `package.json`, `README.md`, `src/server/index.ts`, `src/client/src/components/CloneyPanel.tsx`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks:
+  - `mcp lsp_diagnostics_directory` passed (0 errors)
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm test` passed (`No tests yet`)
+  - `bash -n setup.sh` passed
+- Image-analysis observation: Not applicable (dependency/setup + startup behavior story; no visual layout changes required).
+- **Learnings for future iterations:**
+  - For setup scripts that span optional stacks, stage-gated commands (`full` vs `waifu`) keep standard setup fast while still supporting targeted dependency bootstrap.
+  - For optional local service integrations, combine backend non-fatal startup probes with frontend one-time warnings to make connectivity issues explicit without blocking development flows.
 ---
