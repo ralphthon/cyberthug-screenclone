@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RouteHandler = (req: any, res: any, next: (error?: unknown) => void) => unknown;
 
 class MockAnalysisError extends Error {
