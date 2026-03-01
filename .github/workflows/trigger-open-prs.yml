@@ -1,0 +1,38 @@
+name: Trigger CI on Open PRs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  retrigger:
+    name: Retrigger open PRs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Retrigger CI on all open PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching open PRs..."
+          prs=$(gh pr list --state open --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"')
+
+          if [ -z "$prs" ]; then
+            echo "No open PRs found."
+            exit 0
+          fi
+
+          echo "$prs" | while read -r number branch; do
+            echo "Retrigering PR #${number} (${branch})..."
+            gh pr comment "$number" --body "🔄 CI retriggered via workflow dispatch"
+            # Create an empty commit to trigger CI
+            git checkout "$branch"
+            git commit --allow-empty -m "ci: retrigger CI checks"
+            git push origin "$branch"
+            git checkout main
+            echo "  ✓ PR #${number} retriggered"
+          done
+
+          echo "Done. All open PRs retriggered."
