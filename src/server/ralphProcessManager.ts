@@ -46,7 +46,6 @@ type SessionRuntime = {
   readingProgress: boolean;
   finalized: boolean;
   stopRequested: boolean;
-  completionMarkerBuffer: string;
   workspaceDir: string;
   runtimeDir: string;
   progressFilePath: string;
@@ -59,9 +58,6 @@ const OUTPUT_RING_BUFFER_SIZE = 500;
 const DEFAULT_MAX_CONCURRENT_SESSIONS = 3;
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
 const RALPH_ITERATION_REGEX = /Ralph Iteration\s+(\d+)\s+of\s+(\d+)/i;
-const SCORE_LINE_REGEX = /Score:\s*([0-9]+(?:\.[0-9]+)?)(?:\s*\/\s*100)?/gi;
-const PERCENTAGE_REGEX = /([0-9]+(?:\.[0-9]+)?)\s*%/g;
-const ITERATION_IN_PROGRESS_REGEX = /iteration(?:\s*#|\s+)(\d+)/gi;
 
 const parsePositiveInteger = (value: string | undefined, fallback: number): number => {
   if (!value) {
@@ -111,7 +107,6 @@ const createEmptyRuntime = (sessionId: string): SessionRuntime => {
     readingProgress: false,
     finalized: false,
     stopRequested: false,
-    completionMarkerBuffer: '',
     workspaceDir,
     runtimeDir,
     progressFilePath,
@@ -266,6 +261,19 @@ export class RalphProcessManager extends EventEmitter {
     runtime.stopRequested = true;
     if (!runtime.child.killed) {
       runtime.child.kill('SIGTERM');
+      setTimeout(() => {
+        if (runtime.child && !runtime.child.killed) {
+          const pid = runtime.child.pid;
+          if (pid) {
+            try {
+              process.kill(-pid, 'SIGKILL');
+            } catch {
+              // Process group may already be gone.
+            }
+          }
+          runtime.child.kill('SIGKILL');
+        }
+      }, 10_000).unref();
     }
 
     return true;
@@ -302,6 +310,19 @@ export class RalphProcessManager extends EventEmitter {
       if (runtime.child && !runtime.child.killed) {
         runtime.stopRequested = true;
         runtime.child.kill('SIGTERM');
+        setTimeout(() => {
+          if (runtime.child && !runtime.child.killed) {
+            const pid = runtime.child.pid;
+            if (pid) {
+              try {
+                process.kill(-pid, 'SIGKILL');
+              } catch {
+                // Process group may already be gone.
+              }
+            }
+            runtime.child.kill('SIGKILL');
+          }
+        }, 10_000).unref();
       }
 
       await this.stopProgressWatch(runtime);
@@ -399,6 +420,7 @@ export class RalphProcessManager extends EventEmitter {
     }
 
     runtime.readingProgress = true;
+    const MAX_PROGRESS_READ = 1024 * 1024;
     try {
       while (true) {
         const stats = await fs.stat(runtime.progressFilePath);
@@ -406,23 +428,27 @@ export class RalphProcessManager extends EventEmitter {
           runtime.progressOffsetBytes = 0;
         }
 
-        const unreadBytes = stats.size - runtime.progressOffsetBytes;
+        const unreadBytes = Math.min(stats.size - runtime.progressOffsetBytes, MAX_PROGRESS_READ);
         if (unreadBytes <= 0) {
           break;
         }
 
+        const readStartOffset = runtime.progressOffsetBytes;
         const handle = await fs.open(runtime.progressFilePath, 'r');
         try {
           const buffer = Buffer.alloc(unreadBytes);
-          await handle.read(buffer, 0, unreadBytes, runtime.progressOffsetBytes);
-          runtime.progressOffsetBytes = stats.size;
+          await handle.read(buffer, 0, unreadBytes, readStartOffset);
+          runtime.progressOffsetBytes = readStartOffset + unreadBytes;
           this.parseProgressChunk(runtime, buffer.toString('utf8'));
         } finally {
           await handle.close();
         }
       }
-    } catch {
-      // Best-effort parsing. File might rotate or be removed as process exits.
+    } catch (error) {
+      console.warn('[RalphProcessManager] Failed to read progress append', {
+        sessionId: runtime.sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       runtime.readingProgress = false;
     }
@@ -444,7 +470,8 @@ export class RalphProcessManager extends EventEmitter {
       runtime.lastScore = score;
     }
 
-    const hasIterationContext = /iteration/i.test(chunk);
+    const iterationContextRegex = /iteration/i;
+    const hasIterationContext = iterationContextRegex.test(chunk);
     if (hasIterationContext || score !== null) {
       const eventPayload: RalphIterationCompleteEvent = {
         sessionId: runtime.sessionId,
@@ -465,8 +492,8 @@ export class RalphProcessManager extends EventEmitter {
       }
     }
 
-    ITERATION_IN_PROGRESS_REGEX.lastIndex = 0;
-    let iterationMatch: RegExpExecArray | null = ITERATION_IN_PROGRESS_REGEX.exec(chunk);
+    const iterationInProgressRegex = /iteration(?:\s*#|\s+)(\d+)/gi;
+    let iterationMatch: RegExpExecArray | null = iterationInProgressRegex.exec(chunk);
     let bestIteration: number | null = null;
     while (iterationMatch) {
       const parsed = Number(iterationMatch[1]);
@@ -474,7 +501,7 @@ export class RalphProcessManager extends EventEmitter {
         bestIteration = bestIteration === null ? parsed : Math.max(bestIteration, parsed);
       }
 
-      iterationMatch = ITERATION_IN_PROGRESS_REGEX.exec(chunk);
+      iterationMatch = iterationInProgressRegex.exec(chunk);
     }
 
     return bestIteration;
@@ -483,28 +510,28 @@ export class RalphProcessManager extends EventEmitter {
   private parseScoreFromChunk(chunk: string): number | null {
     const scoreValues: number[] = [];
 
-    SCORE_LINE_REGEX.lastIndex = 0;
-    let scoreMatch = SCORE_LINE_REGEX.exec(chunk);
+    const scoreLineRegex = /Score:\s*([0-9]+(?:\.[0-9]+)?)(?:\s*\/\s*100)?/gi;
+    let scoreMatch = scoreLineRegex.exec(chunk);
     while (scoreMatch) {
       const parsed = Number(scoreMatch[1]);
       if (Number.isFinite(parsed)) {
         scoreValues.push(parsed);
       }
-      scoreMatch = SCORE_LINE_REGEX.exec(chunk);
+      scoreMatch = scoreLineRegex.exec(chunk);
     }
 
     if (scoreValues.length > 0) {
       return scoreValues[scoreValues.length - 1];
     }
 
-    PERCENTAGE_REGEX.lastIndex = 0;
-    let percentMatch = PERCENTAGE_REGEX.exec(chunk);
+    const percentageRegex = /([0-9]+(?:\.[0-9]+)?)\s*%/g;
+    let percentMatch = percentageRegex.exec(chunk);
     while (percentMatch) {
       const parsed = Number(percentMatch[1]);
       if (Number.isFinite(parsed)) {
         scoreValues.push(parsed);
       }
-      percentMatch = PERCENTAGE_REGEX.exec(chunk);
+      percentMatch = percentageRegex.exec(chunk);
     }
 
     if (scoreValues.length === 0) {
@@ -520,7 +547,14 @@ export class RalphProcessManager extends EventEmitter {
 
     const child = spawn(scriptPath, args, {
       cwd: runtime.workspaceDir,
-      env: process.env,
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        LANG: process.env.LANG ?? 'en_US.UTF-8',
+        TERM: process.env.TERM,
+        NODE_ENV: process.env.NODE_ENV,
+        SHELL: process.env.SHELL,
+      },
       stdio: 'pipe',
     });
 
@@ -576,9 +610,7 @@ export class RalphProcessManager extends EventEmitter {
       }
     }
 
-    const COMPLETION_MARKER = '<promise>COMPLETE</promise>';
-    runtime.completionMarkerBuffer = (runtime.completionMarkerBuffer + chunkText).slice(-(COMPLETION_MARKER.length * 2));
-    if (runtime.completionMarkerBuffer.includes(COMPLETION_MARKER)) {
+    if (chunkText.includes('<promise>COMPLETE</promise>')) {
       this.finalize(runtime, 'completed', 'completion-marker-detected');
     }
   }
@@ -615,7 +647,7 @@ export class RalphProcessManager extends EventEmitter {
     if (runtime.stopRequested) {
       this.finalize(runtime, 'failed', `stopped-by-request (${signal ?? 'SIGTERM'})`);
     } else if (code === 0) {
-      this.finalize(runtime, 'completed', 'process-exited-cleanly');
+      this.finalize(runtime, 'failed', 'process-exited-without-completion-marker');
     } else {
       this.finalize(runtime, 'failed', `process-exit-${code ?? 'null'}-${signal ?? 'none'}`);
     }
@@ -641,6 +673,9 @@ export class RalphProcessManager extends EventEmitter {
 
     runtime.finalized = true;
     this.setState(runtime, nextState);
+    setTimeout(() => {
+      this.sessions.delete(runtime.sessionId);
+    }, 5 * 60 * 1000).unref();
 
     if (nextState === 'completed') {
       this.emit('loop-complete', {
