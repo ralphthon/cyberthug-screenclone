@@ -1,0 +1,154 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1772283975097,
+  "projectRoot": "/home/bellman/Workspace/cyberthug-screenclone",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": ">=20",
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "express",
+        "version": "4.21.2",
+        "category": "backend"
+      },
+      {
+        "name": "react",
+        "version": "18.3.1",
+        "category": "frontend"
+      },
+      {
+        "name": "react-dom",
+        "version": "18.3.1",
+        "category": "frontend"
+      },
+      {
+        "name": "@playwright/test",
+        "version": "1.58.2",
+        "category": "testing"
+      },
+      {
+        "name": "vite",
+        "version": "5.4.14",
+        "category": "build"
+      }
+    ],
+    "packageManager": "npm",
+    "runtime": "Node.js 20"
+  },
+  "build": {
+    "buildCommand": "npm run build",
+    "testCommand": "npm test",
+    "lintCommand": "npm run lint",
+    "devCommand": "npm run dev",
+    "scripts": {
+      "dev": "vite --config src/client/vite.config.ts",
+      "server": "tsx watch src/server/index.ts",
+      "dev:all": "concurrently -k \"npm run dev\" \"npm run server\"",
+      "build": "npm run build:client && npm run build:server",
+      "build:client": "vite build --config src/client/vite.config.ts",
+      "build:server": "tsc --project src/server/tsconfig.json",
+      "typecheck": "tsc --project src/client/tsconfig.json --noEmit && tsc --project src/server/tsconfig.json --noEmit",
+      "lint": "eslint .",
+      "test": "echo \"No tests yet\"",
+      "test:smoke": "npx playwright test tests/smoke/",
+      "test:smoke:ui": "npx playwright test tests/smoke/ --ui"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "scripts",
+      "src",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "deps": {
+      "path": "deps",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1772283975088,
+      "keyFiles": []
+    },
+    "designs": {
+      "path": "designs",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1772283975089,
+      "keyFiles": [
+        "mockup-v2.html",
+        "mockup-v2.png",
+        "mockup-v3-collapsed.png",
+        "mockup-v3-expanded.png",
+        "mockup-v3.html"
+      ]
+    },
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 0,
+      "lastAccessed": 1772283975093,
+      "keyFiles": []
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 0,
+      "lastAccessed": 1772283975093,
+      "keyFiles": []
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1772283975094,
+      "keyFiles": []
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 0,
+      "lastAccessed": 1772283975095,
+      "keyFiles": []
+    },
+    "tests/fixtures": {
+      "path": "tests/fixtures",
+      "purpose": "Test fixtures",
+      "fileCount": 1,
+      "lastAccessed": 1772283975096,
+      "keyFiles": [
+        "test-screenshot.png"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

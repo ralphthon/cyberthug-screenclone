@@ -1,0 +1,7 @@
+{
+  "tool_name": "WebFetch",
+  "tool_input_preview": "{\"url\":\"https://raw.githubusercontent.com/team-attention/cops/main/api/internal/platform/interceptor\",\"prompt\":\"List files in the interceptor directory for authentication/context handling.\"}",
+  "error": "Request failed with status code 404",
+  "timestamp": "2026-02-28T12:58:53.649Z",
+  "retry_count": 1
+}
