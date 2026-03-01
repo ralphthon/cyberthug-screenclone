@@ -5,10 +5,10 @@ import { fileURLToPath } from 'node:url';
 const FIXTURE_IMAGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/test-screenshot.png');
 
 test.describe('ST-3: Frontend UI', () => {
-  test('ST-3.1 page loads with RalphTon heading on dark background', async ({ page }) => {
+  test('ST-3.1 page loads with ScreenClone heading on dark background', async ({ page }) => {
     await page.goto('/');
     const heading = page.locator('h1');
-    await expect(heading).toContainText('RalphTon');
+    await expect(heading).toContainText('ScreenClone');
     await expect(heading).toBeVisible();
 
     // Verify dark background on body/main
@@ -20,7 +20,7 @@ test.describe('ST-3: Frontend UI', () => {
 
   test('ST-3.2 drag-drop zone highlights on dragenter', async ({ page }) => {
     await page.goto('/');
-    const dropZone = page.locator('article[role="button"]');
+    const dropZone = page.locator('div[role="button"]');
     await expect(dropZone).toBeVisible();
 
     // Verify drop zone has expected text
@@ -38,7 +38,7 @@ test.describe('ST-3: Frontend UI', () => {
     await fileInput.setInputFiles(FIXTURE_IMAGE);
 
     // Thumbnail should appear
-    const thumbnail = page.locator('img[alt="Screenshot preview 1"]');
+    const thumbnail = page.locator('img[alt="test-screenshot.png"]');
     await expect(thumbnail).toBeVisible({ timeout: 5000 });
   });
 
@@ -73,22 +73,22 @@ test.describe('ST-3: Frontend UI', () => {
     await fileInput.setInputFiles(FIXTURE_IMAGE);
 
     // Verify thumbnail appeared
-    const thumbnail = page.locator('img[alt="Screenshot preview 1"]');
+    const thumbnail = page.locator('img[alt="test-screenshot.png"]');
     await expect(thumbnail).toBeVisible({ timeout: 5000 });
 
-    // Counter should show 1/5
-    const counter = page.locator('article[role="button"] p').first();
-    await expect(counter).toContainText('1/5');
+    // Counter should show 1/5 uploaded
+    const counter = page.locator('text=1/5 uploaded');
+    await expect(counter).toBeVisible();
 
     // Click remove button
-    const removeButton = page.getByRole('button', { name: /Remove screenshot 1/i });
+    const removeButton = page.getByRole('button', { name: /Remove test-screenshot\.png/i });
     await removeButton.click();
 
     // Thumbnail should be gone
     await expect(thumbnail).not.toBeVisible();
 
-    // Counter should show 0/5
-    await expect(counter).toContainText('0/5');
+    // Counter should show 0/5 uploaded
+    await expect(page.locator('text=0/5 uploaded')).toBeVisible();
   });
 
   test('ST-3.6 form settings persist across page reload via localStorage', async ({ page }) => {

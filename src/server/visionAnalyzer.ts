@@ -99,8 +99,12 @@ const MAX_IMAGES = 5;
 const ANALYZE_TIMEOUT_MS = 60_000;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
+const OPENAI_URL = process.env.OPENAI_BASE_URL
+  ? `${process.env.OPENAI_BASE_URL.replace(/\/+$/, '')}/chat/completions`
+  : 'https://api.openai.com/v1/chat/completions';
+const ANTHROPIC_URL = process.env.ANTHROPIC_BASE_URL
+  ? `${process.env.ANTHROPIC_BASE_URL.replace(/\/+$/, '')}/v1/messages`
+  : 'https://api.anthropic.com/v1/messages';
 const OPENAI_MODEL = process.env.OPENAI_VISION_MODEL ?? 'gpt-4o';
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_VISION_MODEL ?? 'claude-3-5-sonnet-latest';
 
@@ -411,7 +415,7 @@ const callOpenAi = async (images: AnalyzeFile[]): Promise<AnalysisResult> => {
 };
 
 const callAnthropic = async (images: AnalyzeFile[]): Promise<AnalysisResult> => {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN;
   if (!apiKey) {
     throw new AnalysisError('ANTHROPIC_API_KEY is not configured', 500, 'PROVIDER_UNAVAILABLE');
   }
@@ -491,7 +495,7 @@ const cleanupCache = (): void => {
 
 const resolveProviderOrder = (): Provider[] => {
   const hasOpenAi = Boolean(process.env.OPENAI_API_KEY);
-  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
+  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN);
 
   if (hasOpenAi && hasAnthropic) {
     return ['openai', 'anthropic'];

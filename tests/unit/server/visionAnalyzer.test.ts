@@ -27,6 +27,7 @@ describe('visionAnalyzer', () => {
 
     delete process.env.OPENAI_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
 
     visionMocks.readdir.mockResolvedValue(['screen-02.png', 'notes.txt', 'screen-01.jpg']);
     visionMocks.readFile.mockResolvedValue(Buffer.from('image-bytes'));
