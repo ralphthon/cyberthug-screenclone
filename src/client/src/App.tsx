@@ -966,41 +966,34 @@ function App(): JSX.Element {
         return { added: 0, rejected: 0 };
       }
 
+      // Classify files eagerly (before state update) so toast logic runs synchronously.
+      const validFiles: File[] = [];
       let typeRejections = 0;
       let sizeRejections = 0;
-      let overflowRejections = 0;
+
+      for (const file of incomingFiles) {
+        if (!ACCEPTED_FILE_TYPES.has(file.type)) {
+          typeRejections += 1;
+        } else if (file.size > MAX_FILE_SIZE_BYTES) {
+          sizeRejections += 1;
+        } else {
+          validFiles.push(file);
+        }
+      }
+
       let added = 0;
+      let overflowRejections = 0;
       let isAlreadyAtCapacity = false;
 
       setFiles((previous) => {
-        let remainingSlots = MAX_FILES - previous.length;
+        const remainingSlots = MAX_FILES - previous.length;
         if (remainingSlots <= 0) {
           isAlreadyAtCapacity = true;
           return previous;
         }
 
-        const acceptedFiles: File[] = [];
-
-        for (const file of incomingFiles) {
-          if (!ACCEPTED_FILE_TYPES.has(file.type)) {
-            typeRejections += 1;
-            continue;
-          }
-
-          if (file.size > MAX_FILE_SIZE_BYTES) {
-            sizeRejections += 1;
-            continue;
-          }
-
-          if (remainingSlots === 0) {
-            overflowRejections += 1;
-            continue;
-          }
-
-          acceptedFiles.push(file);
-          remainingSlots -= 1;
-        }
-
+        const acceptedFiles = validFiles.slice(0, remainingSlots);
+        overflowRejections = validFiles.length - acceptedFiles.length;
         added = acceptedFiles.length;
 
         return acceptedFiles.length > 0 ? [...previous, ...acceptedFiles] : previous;
@@ -1196,7 +1189,7 @@ function App(): JSX.Element {
     setIsScoreChartExpanded(false);
     setIsCloneRunning(true);
 
-    const { githubToken, ...persistableConfig } = cloneConfig;
+    const { githubToken: _, ...persistableConfig } = cloneConfig; // eslint-disable-line @typescript-eslint/no-unused-vars
     window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(persistableConfig));
     setCloneConfigErrors({});
 
