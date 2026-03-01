@@ -36,6 +36,7 @@ const createBrowserHarness = (connected = true) => {
       }
     }),
     setContent: vi.fn().mockResolvedValue(undefined),
+    evaluate: vi.fn().mockResolvedValue(1024),
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png-buffer')),
     close: vi.fn().mockResolvedValue(undefined),
   };
