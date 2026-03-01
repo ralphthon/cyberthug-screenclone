@@ -1,4 +1,5 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
+import path from 'node:path';
 import puppeteer, { type Browser, type HTTPRequest } from 'puppeteer-core';
 
 export type RenderRequestInput = {
@@ -42,6 +43,29 @@ const CHROMIUM_CANDIDATE_PATHS = [
   '/usr/bin/google-chrome-stable',
   '/usr/bin/google-chrome',
 ];
+
+const findCachedPuppeteerChrome = async (): Promise<string | null> => {
+  const cacheDir = path.join(process.env.HOME ?? '/root', '.cache', 'puppeteer', 'chrome');
+  try {
+    const entries = await fs.readdir(cacheDir);
+    const linuxDirs = entries
+      .filter((e) => e.startsWith('linux-'))
+      .sort()
+      .reverse();
+    for (const dir of linuxDirs) {
+      const candidate = path.join(cacheDir, dir, 'chrome-linux64', 'chrome');
+      try {
+        await fs.access(candidate, fsConstants.X_OK);
+        return candidate;
+      } catch {
+        // Try next version.
+      }
+    }
+  } catch {
+    // Cache directory doesn't exist.
+  }
+  return null;
+};
 
 let browserPromise: Promise<Browser> | null = null;
 let browserInstance: Browser | null = null;
@@ -150,6 +174,11 @@ const resolveExecutablePath = async (): Promise<string> => {
     } catch {
       // Try next known chromium path.
     }
+  }
+
+  const cachedChrome = await findCachedPuppeteerChrome();
+  if (cachedChrome) {
+    return cachedChrome;
   }
 
   throw new RenderError(

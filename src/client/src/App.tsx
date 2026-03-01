@@ -356,6 +356,7 @@ function App(): JSX.Element {
   const activeSliderPointerIdRef = useRef<number | null>(null);
   const isPanningRef = useRef(false);
   const panAnchorRef = useRef<{ pointerX: number; pointerY: number; panX: number; panY: number } | null>(null);
+  const cloneStartLockRef = useRef(false);
 
   const [files, setFiles] = useState<File[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -861,6 +862,7 @@ function App(): JSX.Element {
       if (eventName === 'loop-complete') {
         setLoopStatus('complete');
         setIsCloneRunning(false);
+        cloneStartLockRef.current = false;
         setConnectionStatus('disconnected');
         setLoopSummary({
           finalScore: parseNumber(eventData.finalScore),
@@ -887,6 +889,7 @@ function App(): JSX.Element {
         setLoopStatus('error');
         setLoopErrorMessage(message);
         setIsCloneRunning(false);
+        cloneStartLockRef.current = false;
         setConnectionStatus('disconnected');
         closeEventStream();
       }
@@ -1125,7 +1128,13 @@ function App(): JSX.Element {
   );
 
   const startCloneLoop = useCallback(async (): Promise<CloneyBridgeActionResult> => {
+    if (cloneStartLockRef.current) {
+      return { ok: false, message: 'Clone start already in progress.', sessionId: null };
+    }
+    cloneStartLockRef.current = true;
+
     if (isCloneRunning) {
+      cloneStartLockRef.current = false;
       return {
         ok: false,
         message: 'A clone session is already running.',
@@ -1138,6 +1147,7 @@ function App(): JSX.Element {
 
     if (hasErrors) {
       setCloneConfigErrors(nextErrors);
+      cloneStartLockRef.current = false;
       return {
         ok: false,
         message: 'Please fix the clone settings form errors first.',
@@ -1147,6 +1157,7 @@ function App(): JSX.Element {
 
     if (files.length === 0) {
       addToast('Upload at least one screenshot before starting.');
+      cloneStartLockRef.current = false;
       return {
         ok: false,
         message: 'Upload screenshots first so I can start cloning.',
@@ -1234,6 +1245,7 @@ function App(): JSX.Element {
       setConnectionStatus('disconnected');
       setLoopErrorMessage(message);
       setIsCloneRunning(false);
+      cloneStartLockRef.current = false;
       addToast(message);
       return {
         ok: false,

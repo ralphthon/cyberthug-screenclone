@@ -46,6 +46,7 @@ type SessionRuntime = {
   readingProgress: boolean;
   finalized: boolean;
   stopRequested: boolean;
+  completionMarkerBuffer: string;
   workspaceDir: string;
   runtimeDir: string;
   progressFilePath: string;
@@ -110,6 +111,7 @@ const createEmptyRuntime = (sessionId: string): SessionRuntime => {
     readingProgress: false,
     finalized: false,
     stopRequested: false,
+    completionMarkerBuffer: '',
     workspaceDir,
     runtimeDir,
     progressFilePath,
@@ -574,7 +576,9 @@ export class RalphProcessManager extends EventEmitter {
       }
     }
 
-    if (chunkText.includes('<promise>COMPLETE</promise>')) {
+    const COMPLETION_MARKER = '<promise>COMPLETE</promise>';
+    runtime.completionMarkerBuffer = (runtime.completionMarkerBuffer + chunkText).slice(-(COMPLETION_MARKER.length * 2));
+    if (runtime.completionMarkerBuffer.includes(COMPLETION_MARKER)) {
       this.finalize(runtime, 'completed', 'completion-marker-detected');
     }
   }
@@ -611,7 +615,7 @@ export class RalphProcessManager extends EventEmitter {
     if (runtime.stopRequested) {
       this.finalize(runtime, 'failed', `stopped-by-request (${signal ?? 'SIGTERM'})`);
     } else if (code === 0) {
-      this.finalize(runtime, 'failed', 'process-exited-without-completion-marker');
+      this.finalize(runtime, 'completed', 'process-exited-cleanly');
     } else {
       this.finalize(runtime, 'failed', `process-exit-${code ?? 'null'}-${signal ?? 'none'}`);
     }

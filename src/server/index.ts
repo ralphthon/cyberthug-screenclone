@@ -623,9 +623,19 @@ const cleanupTimer = setInterval(() => {
 }, CLEANUP_INTERVAL_MS);
 cleanupTimer.unref();
 
+const buildCorsOrigins = (): string[] => {
+  const defaults = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+  const extra = process.env.CORS_ALLOWED_ORIGINS?.trim();
+  if (!extra) {
+    return defaults;
+  }
+  const parsed = extra.split(',').map((o) => o.trim()).filter((o) => o.length > 0);
+  return [...new Set([...defaults, ...parsed])];
+};
+
 app.use(
   cors({
-    origin: 'http://localhost:5173',
+    origin: buildCorsOrigins(),
   }),
 );
 app.use(express.json({ limit: '2mb' }));
@@ -1117,6 +1127,8 @@ const autoEvaluateIteration = async (
       original: originalBase64,
       generated: renderedScreenshotBase64,
       mode: 'both',
+      sessionId,
+      iteration,
     });
     const result: IterationAutoEvaluationResult = {
       primaryScore: compareResult.primaryScore,
