@@ -267,7 +267,9 @@ export class RalphProcessManager extends EventEmitter {
           if (pid) {
             try {
               process.kill(-pid, 'SIGKILL');
-            } catch {}
+            } catch {
+              // Process group may already be gone.
+            }
           }
           runtime.child.kill('SIGKILL');
         }
@@ -314,7 +316,9 @@ export class RalphProcessManager extends EventEmitter {
             if (pid) {
               try {
                 process.kill(-pid, 'SIGKILL');
-              } catch {}
+              } catch {
+                // Process group may already be gone.
+              }
             }
             runtime.child.kill('SIGKILL');
           }
