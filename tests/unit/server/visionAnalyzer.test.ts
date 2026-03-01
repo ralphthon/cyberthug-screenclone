@@ -79,10 +79,10 @@ describe('visionAnalyzer', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const { analyzeSessionScreenshots } = await importVisionAnalyzer();
-    const result = await analyzeSessionScreenshots({ sessionId: 'abc123' });
+    const result = await analyzeSessionScreenshots({ sessionId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(visionMocks.readdir).toHaveBeenCalledWith('/tmp/ralphton-abc123');
+    expect(visionMocks.readdir).toHaveBeenCalledWith('/tmp/ralphton-a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11');
     expect(visionMocks.readFile).toHaveBeenCalledTimes(2);
     expect(result.layout.type).toBe('hero');
     expect(result.colorPalette.primary).toBe('#111111');
@@ -103,8 +103,8 @@ describe('visionAnalyzer', () => {
 
     const { analyzeSessionScreenshots } = await importVisionAnalyzer();
 
-    const first = await analyzeSessionScreenshots({ sessionId: 'cache-session' });
-    const second = await analyzeSessionScreenshots({ sessionId: 'cache-session' });
+    const first = await analyzeSessionScreenshots({ sessionId: 'b1ffcd00-ad1c-4ef9-bc7e-7cc0ce491b22' });
+    const second = await analyzeSessionScreenshots({ sessionId: 'b1ffcd00-ad1c-4ef9-bc7e-7cc0ce491b22' });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(first).toEqual(second);
@@ -132,7 +132,7 @@ describe('visionAnalyzer', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const { analyzeSessionScreenshots } = await importVisionAnalyzer();
-    const result = await analyzeSessionScreenshots({ sessionId: 'fallback-session' });
+    const result = await analyzeSessionScreenshots({ sessionId: 'c2aabb11-be2d-4ef0-ad8f-8dd1df592c33' });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.layout.type).toBe('single');
@@ -149,18 +149,18 @@ describe('visionAnalyzer', () => {
       code: 'INVALID_REQUEST',
     });
 
-    await expect(analyzeSessionScreenshots({ sessionId: 'ok', imageIndex: -1 })).rejects.toMatchObject({
+    await expect(analyzeSessionScreenshots({ sessionId: 'd3bbcc22-cf3e-4fa1-be90-9ee2ef6a3d44', imageIndex: -1 })).rejects.toMatchObject({
       status: 400,
       code: 'INVALID_REQUEST',
     });
 
-    await expect(analyzeSessionScreenshots({ sessionId: 'ok', imageIndex: 100 })).rejects.toMatchObject({
+    await expect(analyzeSessionScreenshots({ sessionId: 'd3bbcc22-cf3e-4fa1-be90-9ee2ef6a3d44', imageIndex: 100 })).rejects.toMatchObject({
       status: 400,
       code: 'INVALID_REQUEST',
     });
 
-    await expect(analyzeSessionScreenshots({ sessionId: 'ok' })).rejects.toBeInstanceOf(AnalysisError);
-    await expect(analyzeSessionScreenshots({ sessionId: 'ok' })).rejects.toMatchObject({
+    await expect(analyzeSessionScreenshots({ sessionId: 'd3bbcc22-cf3e-4fa1-be90-9ee2ef6a3d44' })).rejects.toBeInstanceOf(AnalysisError);
+    await expect(analyzeSessionScreenshots({ sessionId: 'd3bbcc22-cf3e-4fa1-be90-9ee2ef6a3d44' })).rejects.toMatchObject({
       status: 500,
       code: 'PROVIDER_UNAVAILABLE',
     });
@@ -177,7 +177,7 @@ describe('visionAnalyzer', () => {
 
     const { analyzeSessionScreenshots } = await importVisionAnalyzer();
 
-    await expect(analyzeSessionScreenshots({ sessionId: 'missing-session' })).rejects.toMatchObject({
+    await expect(analyzeSessionScreenshots({ sessionId: 'e4ccdd33-d04f-4fb2-af01-aff3f07b4e55' })).rejects.toMatchObject({
       status: 404,
       code: 'SESSION_NOT_FOUND',
     });
