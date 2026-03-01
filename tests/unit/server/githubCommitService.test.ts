@@ -77,7 +77,7 @@ const createSession = (overrides: Record<string, unknown> = {}) => ({
   branchRef: 'heads/ralph/clone-screenclone-20260301000000',
   defaultBranch: 'main',
   projectName: 'ScreenClone',
-  sessionId: 'session-1',
+  sessionId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
   originalScreenshotReference: 'shot.png',
   branchCreated: false,
   committedIterations: new Set<number>(),
@@ -129,7 +129,7 @@ describe('githubCommitService', () => {
     const { initializeGitHubCommitSession } = await importModule();
     const session = await initializeGitHubCommitSession({
       projectName: 'My Project',
-      sessionId: 'session-valid-url',
+      sessionId: 'b1ffcd00-ad1c-4ef9-bc7e-7cc0ce491b22',
       repoUrl,
       token: 'token-1',
     });
@@ -151,7 +151,7 @@ describe('githubCommitService', () => {
       await expect(
         initializeGitHubCommitSession({
           projectName: 'Invalid Repo',
-          sessionId: 'session-invalid-url',
+          sessionId: 'c2aabb11-be2d-4ef0-ad8f-8dd1df592c33',
           repoUrl,
           token: 'token-2',
         }),
@@ -168,7 +168,7 @@ describe('githubCommitService', () => {
     await expect(
       initializeGitHubCommitSession({
         projectName: 'Invalid Host',
-        sessionId: 'session-invalid-host',
+        sessionId: 'd3bbcc22-cf3e-4fa1-be90-9ee2ef6a3d44',
         repoUrl: 'https://gitlab.com/acme/screenclone',
         token: 'token-3',
       }),
@@ -184,7 +184,7 @@ describe('githubCommitService', () => {
     const { initializeGitHubCommitSession } = await importModule();
     const session = await initializeGitHubCommitSession({
       projectName: 'Space Clone',
-      sessionId: 'session-success',
+      sessionId: 'e4ccdd33-d04f-4fb2-af01-aff3f07b4e55',
       repoUrl: 'https://github.com/acme/screenclone',
       token: 'token-success',
     });
@@ -205,7 +205,7 @@ describe('githubCommitService', () => {
     await expect(
       initializeGitHubCommitSession({
         projectName: 'Auth Fail',
-        sessionId: 'session-auth-fail',
+        sessionId: 'f5ddee44-e150-4ab3-b012-b004f18c5f66',
         repoUrl: 'https://github.com/acme/screenclone',
         token: 'bad-token',
       }),
@@ -223,7 +223,7 @@ describe('githubCommitService', () => {
     await expect(
       initializeGitHubCommitSession({
         projectName: 'Repo Missing',
-        sessionId: 'session-repo-missing',
+        sessionId: 'a6eeff55-f261-4bc4-a123-c115a29d6a77',
         repoUrl: 'https://github.com/acme/missing-repo',
         token: 'token-ok',
       }),
@@ -401,7 +401,7 @@ describe('githubCommitService', () => {
 
     const { buildSnapshotFiles } = await importModule();
     const files = await buildSnapshotFiles({
-      sessionId: 'session-files-ok',
+      sessionId: 'b7ff0066-a372-4cd5-b234-d226b3ae7b88',
       projectName: 'Workspace Project',
       targetScore: 94,
       branchName: 'ralph/clone-workspace-project-20260301030303',
@@ -421,7 +421,7 @@ describe('githubCommitService', () => {
 
     const { buildSnapshotFiles } = await importModule();
     const files = await buildSnapshotFiles({
-      sessionId: 'session-files-missing',
+      sessionId: 'c8001177-b483-4de6-a345-e337c4bf8c99',
       projectName: 'Fallback Project',
       targetScore: 92,
       branchName: 'ralph/clone-fallback-project-20260301040404',
