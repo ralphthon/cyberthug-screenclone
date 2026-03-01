@@ -94,9 +94,11 @@ export interface LoopStartRequest {
   config: LoopStartConfig;
 }
 
+export type LoopState = 'uploading' | 'analyzing' | 'cloning' | 'completed' | 'failed';
+
 export interface LoopStartResponse {
   sessionId: string;
-  state: string;
+  state: LoopState;
   currentIteration: number;
   maxIterations: number;
   targetScore: number;
@@ -119,7 +121,7 @@ export interface LoopStatusResponse {
     targetScore: number;
     githubUrl: string | null;
   };
-  state: string;
+  state: LoopState;
   currentIteration: number;
   maxIterations: number;
   lastScore: number | null;
