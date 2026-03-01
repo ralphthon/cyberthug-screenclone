@@ -96,10 +96,11 @@ type CacheEntry = {
 const SESSION_DIR_PREFIX = 'ralphton-';
 const TMP_ROOT = '/tmp';
 const MAX_IMAGES = 5;
+const MAX_CACHE_SIZE = 500;
 const ANALYZE_TIMEOUT_MS = 60_000;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+const OPENAI_URL = `${process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}/chat/completions`;
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const OPENAI_MODEL = process.env.OPENAI_VISION_MODEL ?? 'gpt-4o';
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_VISION_MODEL ?? 'claude-3-5-sonnet-latest';
@@ -245,10 +246,16 @@ const detectMimeTypeFromPath = (filePath: string): string | null => {
 
 const sessionDirFor = (sessionId: string): string => path.join(TMP_ROOT, `${SESSION_DIR_PREFIX}${sessionId}`);
 
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const validateInput = (input: AnalyzeRequestInput): { sessionId: string; imageIndex?: number } => {
   const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
   if (!sessionId) {
     throw new AnalysisError('sessionId is required', 400, 'INVALID_REQUEST');
+  }
+
+  if (!UUID_V4_REGEX.test(sessionId)) {
+    throw new AnalysisError('Invalid sessionId format', 400, 'INVALID_REQUEST');
   }
 
   let imageIndex: number | undefined;
@@ -342,7 +349,7 @@ const parseJsonFromModelText = (text: string): unknown => {
   }
 };
 
-const callOpenAi = async (images: AnalyzeFile[]): Promise<AnalysisResult> => {
+const callOpenAi = async (images: AnalyzeFile[], signal?: AbortSignal): Promise<AnalysisResult> => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new AnalysisError('OPENAI_API_KEY is not configured', 500, 'PROVIDER_UNAVAILABLE');
@@ -386,9 +393,11 @@ const callOpenAi = async (images: AnalyzeFile[]): Promise<AnalysisResult> => {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
+    signal,
   });
 
   if (!response.ok) {
+    await response.text().catch(() => {});
     throw new AnalysisError(`OpenAI vision request failed with status ${response.status}`, 500, 'PROVIDER_FAILURE', true);
   }
 
@@ -410,7 +419,7 @@ const callOpenAi = async (images: AnalyzeFile[]): Promise<AnalysisResult> => {
   return coerceAnalysisResult(parsed);
 };
 
-const callAnthropic = async (images: AnalyzeFile[]): Promise<AnalysisResult> => {
+const callAnthropic = async (images: AnalyzeFile[], signal?: AbortSignal): Promise<AnalysisResult> => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new AnalysisError('ANTHROPIC_API_KEY is not configured', 500, 'PROVIDER_UNAVAILABLE');
@@ -452,9 +461,11 @@ const callAnthropic = async (images: AnalyzeFile[]): Promise<AnalysisResult> => 
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
+    signal,
   });
 
   if (!response.ok) {
+    await response.text().catch(() => {});
     throw new AnalysisError(
       `Anthropic vision request failed with status ${response.status}`,
       500,
@@ -512,17 +523,17 @@ const resolveProviderOrder = (): Provider[] => {
   );
 };
 
-const analyzeViaProviders = async (images: AnalyzeFile[]): Promise<AnalysisResult> => {
+const analyzeViaProviders = async (images: AnalyzeFile[], signal?: AbortSignal): Promise<AnalysisResult> => {
   const providers = resolveProviderOrder();
   const failures: string[] = [];
 
   for (const provider of providers) {
     try {
       if (provider === 'openai') {
-        return await callOpenAi(images);
+        return await callOpenAi(images, signal);
       }
 
-      return await callAnthropic(images);
+      return await callAnthropic(images, signal);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown provider failure';
       failures.push(`${provider}: ${message}`);
@@ -562,7 +573,15 @@ export const analyzeSessionScreenshots = async (input: AnalyzeRequestInput): Pro
             );
           })();
 
-  const result = await withTimeout(analyzeViaProviders(selectedImages), ANALYZE_TIMEOUT_MS);
+  const abortController = new AbortController();
+  const result = await withTimeout(analyzeViaProviders(selectedImages, abortController.signal), ANALYZE_TIMEOUT_MS);
+
+  if (analysisCache.size >= MAX_CACHE_SIZE) {
+    const oldestKey = analysisCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      analysisCache.delete(oldestKey);
+    }
+  }
 
   analysisCache.set(cacheKey, {
     value: result,

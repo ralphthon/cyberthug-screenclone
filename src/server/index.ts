@@ -1,5 +1,7 @@
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 import JSZip from 'jszip';
 import multer, { type FileFilterCallback } from 'multer';
 import { constants as fsConstants, promises as fs } from 'node:fs';
@@ -96,6 +98,9 @@ const MAX_LOOP_EVENT_HISTORY = 200;
 const RALPH_RUNNER_PATH = path.resolve(process.cwd(), 'scripts', 'ralph', 'ralph.sh');
 const OPENWAIFU_DEFAULT_WS_URL = 'ws://localhost:12393/ws';
 const OPENWAIFU_PROBE_TIMEOUT_MS = 1_500;
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+type CompareMode = 'vision' | 'pixel' | 'both';
+const ALLOWED_COMPARE_MODES = new Set<CompareMode>(['vision', 'pixel', 'both']);
 
 type LoopStartConfig = {
   projectName: string;
@@ -623,12 +628,48 @@ const cleanupTimer = setInterval(() => {
 }, CLEANUP_INTERVAL_MS);
 cleanupTimer.unref();
 
+app.use(helmet());
 app.use(
   cors({
-    origin: 'http://localhost:5173',
+    origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   }),
 );
 app.use(express.json({ limit: '2mb' }));
+
+const apiKeyAuthMiddleware = (req: Request, res: Response, next: NextFunction): void => {
+  const configuredApiKey = process.env.API_KEY;
+  if (!configuredApiKey) {
+    next();
+    return;
+  }
+
+  const apiKeyHeader = req.headers['x-api-key'];
+  const requestApiKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
+  if (requestApiKey !== configuredApiKey) {
+    res.status(401).json({ error: 'Unauthorized', code: 'INVALID_REQUEST' });
+    return;
+  }
+
+  next();
+};
+
+const apiRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const heavyApiRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/api', apiKeyAuthMiddleware);
+app.use('/api', apiRateLimiter);
+app.use(['/api/render', '/api/loop/start', '/api/analyze', '/api/compare'], heavyApiRateLimiter);
 
 app.get('/api/health', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', version: '1.0.0' });
@@ -670,7 +711,6 @@ app.post('/api/upload', (req: Request, res: Response, next: NextFunction) => {
       sessionId: req.uploadSessionId,
       files: files.map((file) => ({
         filename: file.originalname,
-        path: file.path,
         size: file.size,
         mimetype: file.mimetype,
       })),
@@ -738,6 +778,19 @@ const parseLoopString = (rawValue: unknown, field: string, required: boolean): s
   return trimmed;
 };
 
+const parseSessionId = (rawValue: unknown, field: string, required: boolean): string => {
+  const parsed = parseLoopString(rawValue, field, required);
+  if (parsed.length === 0) {
+    return '';
+  }
+
+  if (!UUID_V4_REGEX.test(parsed)) {
+    throw new ApiError(`${field} must be a valid UUID v4`, 'INVALID_REQUEST', 400);
+  }
+
+  return parsed;
+};
+
 const parseLoopInteger = (rawValue: unknown, field: string, min: number, max: number): number => {
   const parsedValue =
     typeof rawValue === 'number'
@@ -766,7 +819,7 @@ const getRalphStatusOrNull = (sessionId: string): RalphSessionStatus | null => {
 
 const parseLoopStartRequest = (body: unknown): { sessionId: string; config: LoopStartConfig } => {
   const payload = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
-  const sessionId = parseLoopString(payload.sessionId, 'sessionId', true);
+  const sessionId = parseSessionId(payload.sessionId, 'sessionId', true);
   const configRaw = payload.config && typeof payload.config === 'object' ? (payload.config as Record<string, unknown>) : null;
 
   if (!configRaw) {
@@ -1494,14 +1547,7 @@ ralphProcessManager.on('loop-error', (payload: ManagerLoopErrorEvent) => {
 
 app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const sessionId =
-      typeof req.body?.sessionId === 'string' && req.body.sessionId.trim().length > 0
-        ? req.body.sessionId.trim()
-        : null;
-
-    if (!sessionId) {
-      throw new ApiError('sessionId is required', 'INVALID_REQUEST', 400);
-    }
+    const sessionId = parseSessionId(req.body?.sessionId, 'sessionId', true);
 
     const imageIndex = parseImageIndex(req.body?.imageIndex);
     const analysis = await analyzeSessionScreenshots({
@@ -1567,15 +1613,22 @@ app.post('/api/compare', async (req: Request, res: Response, next: NextFunction)
       iteration = parsedIteration;
     }
 
-    const sessionId =
-      typeof req.body?.sessionId === 'string' && req.body.sessionId.trim().length > 0
-        ? req.body.sessionId.trim()
-        : undefined;
+    const parsedSessionId = parseSessionId(req.body?.sessionId, 'sessionId', false);
+    const sessionId = parsedSessionId.length > 0 ? parsedSessionId : undefined;
+
+    const modeRaw = req.body?.mode;
+    let mode: CompareMode | undefined;
+    if (modeRaw !== undefined && modeRaw !== null && modeRaw !== '') {
+      if (typeof modeRaw !== 'string' || !ALLOWED_COMPARE_MODES.has(modeRaw as CompareMode)) {
+        throw new ApiError("mode must be one of 'vision', 'pixel', or 'both'", 'INVALID_REQUEST', 400);
+      }
+      mode = modeRaw as CompareMode;
+    }
 
     const compareResult = await compareScreenshots({
       original: typeof req.body?.original === 'string' ? req.body.original : '',
       generated: typeof req.body?.generated === 'string' ? req.body.generated : '',
-      mode: req.body?.mode as 'vision' | 'pixel' | 'both' | undefined,
+      mode,
       sessionId,
       iteration,
     });
@@ -1614,6 +1667,7 @@ app.post('/api/loop/start', async (req: Request, res: Response, next: NextFuncti
         scoreHistory: [],
         queue: Promise.resolve(),
       };
+      config.githubToken = undefined;
     }
 
     const analysis = await analyzeSessionScreenshots({ sessionId });
@@ -1670,7 +1724,7 @@ app.post('/api/loop/start', async (req: Request, res: Response, next: NextFuncti
 
 app.get('/api/loop/:sessionId/events', (req: Request, res: Response, next: NextFunction) => {
   try {
-    const sessionId = parseLoopString(req.params.sessionId, 'sessionId', true);
+    const sessionId = parseSessionId(req.params.sessionId, 'sessionId', true);
     const session = loopSessions.get(sessionId);
     if (!session) {
       throw new ApiError(`Session '${sessionId}' not found`, 'LOOP_NOT_FOUND', 404);
@@ -1711,7 +1765,7 @@ app.get('/api/loop/:sessionId/events', (req: Request, res: Response, next: NextF
 
 app.get('/api/loop/:sessionId/status', (req: Request, res: Response, next: NextFunction) => {
   try {
-    const sessionId = parseLoopString(req.params.sessionId, 'sessionId', true);
+    const sessionId = parseSessionId(req.params.sessionId, 'sessionId', true);
     const statusPayload = buildLoopStatusResponse(sessionId);
     res.status(200).json(statusPayload);
   } catch (error) {
@@ -1726,7 +1780,7 @@ const handleLoopDownloadRequest = async (
   options: { headOnly: boolean },
 ): Promise<void> => {
   try {
-    const sessionId = parseLoopString(req.params.sessionId, 'sessionId', true);
+    const sessionId = parseSessionId(req.params.sessionId, 'sessionId', true);
     const session = loopSessions.get(sessionId);
     if (!session) {
       throw new ApiError(`Session '${sessionId}' not found`, 'LOOP_NOT_FOUND', 404);
@@ -1779,7 +1833,7 @@ app.get('/api/loop/:sessionId/download', (req: Request, res: Response, next: Nex
 
 app.post('/api/loop/:sessionId/stop', (req: Request, res: Response, next: NextFunction) => {
   try {
-    const sessionId = parseLoopString(req.params.sessionId, 'sessionId', true);
+    const sessionId = parseSessionId(req.params.sessionId, 'sessionId', true);
     const session = loopSessions.get(sessionId);
     if (!session) {
       throw new ApiError(`Session '${sessionId}' not found`, 'LOOP_NOT_FOUND', 404);
@@ -1867,3 +1921,10 @@ const shutdown = (): void => {
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+process.on('unhandledRejection', (reason) => {
+  console.error('[process] Unhandled promise rejection', reason);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[process] Uncaught exception', error);
+  shutdown();
+});

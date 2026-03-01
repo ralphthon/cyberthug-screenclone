@@ -131,7 +131,7 @@ const DEFAULT_OLV_CONFIG: OlvConfig = {
 
 const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
   {
-    id: 1,
+    id: 0,
     sender: 'cloney',
     text: 'Hi, I am Cloney. Share screenshots and tell me what to clone.',
     emotion: 'joy',
@@ -389,6 +389,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const sessionBridgeRef = useRef<Map<string, string>>(new Map());
   const lastHandledLoopEventIdRef = useRef<number | null>(null);
   const lastMappedSessionIdRef = useRef<string | null>(null);
+  const messageIdRef = useRef(0);
   const openWaifuSessionIdRef = useRef<string>(
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -414,6 +415,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const [iframeReachable, setIframeReachable] = useState(true);
   const [iframeReloadKey, setIframeReloadKey] = useState(0);
   const [isVoiceMuted, setIsVoiceMuted] = useState(false);
+  const isVoiceMutedRef = useRef(isVoiceMuted);
   const [isCompactViewport, setIsCompactViewport] = useState(() =>
     window.matchMedia('(max-width: 1023px)').matches,
   );
@@ -424,8 +426,13 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       return;
     }
 
-    contentWindow.postMessage(payload, '*');
-  }, []);
+    try {
+      const targetOrigin = new URL(appliedConfig.iframeUrl).origin;
+      contentWindow.postMessage(payload, targetOrigin);
+    } catch {
+      return;
+    }
+  }, [appliedConfig.iframeUrl]);
 
   const broadcastExpression = useCallback(
     (expressionIndex: number) => {
@@ -504,7 +511,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const sendSystemSpeech = useCallback(
     (text: string, emotion: EmotionTag | null) => {
       const ws = websocketRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN || isVoiceMuted) {
+      if (!ws || ws.readyState !== WebSocket.OPEN || isVoiceMutedRef.current) {
         return;
       }
 
@@ -514,7 +521,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
           sender: 'system',
           text,
           emotion: emotion ? `[${emotion}]` : undefined,
-          voice_enabled: !isVoiceMuted,
+          voice_enabled: !isVoiceMutedRef.current,
           tts: {
             engine: 'qwen3',
             voice: appliedConfig.ttsVoice,
@@ -524,7 +531,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
         }),
       );
     },
-    [appliedConfig.ttsVoice, isVoiceMuted],
+    [appliedConfig.ttsVoice],
   );
 
   const applyEmotionExpression = useCallback(
@@ -543,34 +550,37 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       emotion: EmotionTag | null,
       options?: { progressBadge?: string | null; voice?: boolean },
     ) => {
-    const nextText = text.trim();
-    if (nextText.length === 0) {
-      return;
-    }
+      const nextText = text.trim();
+      if (nextText.length === 0) {
+        return;
+      }
 
-    const nextMessage: ChatMessage = {
-      id: Date.now() + Math.floor(Math.random() * 1000),
-      sender,
-      text: nextText,
-      emotion,
-      progressBadge: options?.progressBadge ?? null,
-      createdAt: Date.now(),
-    };
+      const nextMessage: ChatMessage = {
+        id: ++messageIdRef.current,
+        sender,
+        text: nextText,
+        emotion,
+        progressBadge: options?.progressBadge ?? null,
+        createdAt: Date.now(),
+      };
 
-    setChatMessages((previous) => [...previous, nextMessage]);
+      setChatMessages((previous) => {
+        const next = [...previous, nextMessage];
+        return next.length > 200 ? next.slice(-200) : next;
+      });
 
-    if (sender === 'cloney' && emotion) {
-      applyEmotionExpression(emotion);
-    }
+      if (sender === 'cloney' && emotion) {
+        applyEmotionExpression(emotion);
+      }
 
-    if (sender === 'cloney' && options?.voice !== false) {
-      sendSystemSpeech(nextText, emotion);
-    }
+      if (sender === 'cloney' && options?.voice !== false) {
+        sendSystemSpeech(nextText, emotion);
+      }
 
-    if (sender === 'cloney' && collapsedRef.current) {
-      setUnreadCount((previous) => previous + 1);
-    }
-  },
+      if (sender === 'cloney' && collapsedRef.current) {
+        setUnreadCount((previous) => previous + 1);
+      }
+    },
     [applyEmotionExpression, sendSystemSpeech],
   );
 
@@ -707,6 +717,10 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   }, [isVoiceMuted]);
 
   useEffect(() => {
+    isVoiceMutedRef.current = isVoiceMuted;
+  }, [isVoiceMuted]);
+
+  useEffect(() => {
     if (isPanelCollapsed) {
       return;
     }
@@ -724,6 +738,14 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
 
   useEffect(() => {
     const handleWindowMessage = (event: MessageEvent<unknown>) => {
+      try {
+        if (event.origin !== new URL(appliedConfig.iframeUrl).origin) {
+          return;
+        }
+      } catch {
+        return;
+      }
+
       if (!event.data || typeof event.data !== 'object' || Array.isArray(event.data)) {
         return;
       }
@@ -735,7 +757,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
     return () => {
       window.removeEventListener('message', handleWindowMessage);
     };
-  }, [handleBridgePayload]);
+  }, [appliedConfig.iframeUrl, handleBridgePayload]);
 
   useEffect(() => {
     return () => {
@@ -1147,7 +1169,9 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
 
       const intent = detectBridgeIntent(trimmed);
       if (intent) {
-        void handleBridgeIntent(intent);
+        handleBridgeIntent(intent).catch((error) => {
+          appendMessage('system', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`, null);
+        });
         return;
       }
 
@@ -1303,6 +1327,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
                     type={showApiKey ? 'text' : 'password'}
                     value={olvConfig.llmApiKey}
                     onChange={(event) => handleConfigChange('llmApiKey', event.target.value)}
+                    autoComplete="off"
                     className="w-full bg-transparent text-sm text-slate-100 outline-none"
                     placeholder="sk-..."
                   />
@@ -1368,7 +1393,9 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
               <button
                 type="button"
                 onClick={() => {
-                  void handleSaveSettings();
+                  handleSaveSettings().catch((error) => {
+                    appendMessage('system', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`, null);
+                  });
                 }}
                   disabled={saveState === 'saving'}
                   className="rounded-md border border-indigo-500/50 bg-indigo-500/20 px-2.5 py-1.5 text-xs font-semibold text-indigo-100 transition hover:bg-indigo-500/30 disabled:opacity-60"
@@ -1443,7 +1470,12 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
 
         <section className="min-h-0 flex-1 px-4 py-3">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Chat History</h3>
-          <div ref={chatScrollRef} className="h-full max-h-[240px] overflow-y-auto rounded-lg border border-slate-700 bg-surface/60 p-3">
+          <div
+            ref={chatScrollRef}
+            role="log"
+            aria-live="polite"
+            className="h-full max-h-[240px] overflow-y-auto rounded-lg border border-slate-700 bg-surface/60 p-3"
+          >
             <div className="space-y-2">
               {chatMessages.map((message) => {
                 const isUser = message.sender === 'user';
@@ -1485,6 +1517,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
               value={chatInput}
               onChange={(event) => setChatInput(event.target.value)}
               onPaste={handleChatPaste}
+              aria-label="Chat message"
               placeholder="Message Cloney..."
               className="w-full rounded-md border border-slate-700 bg-surface/90 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-indigo-400"
             />

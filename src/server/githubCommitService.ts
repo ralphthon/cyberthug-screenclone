@@ -84,6 +84,10 @@ const parseRepoUrl = (repoUrl: string): { owner: string; repo: string } => {
     throw new GitHubCommitError('GitHub repo URL must include owner and repo name', 'INVALID_REPO', 400);
   }
 
+  if (!GITHUB_NAME_PATTERN.test(owner) || !GITHUB_NAME_PATTERN.test(repo)) {
+    throw new GitHubCommitError('Invalid GitHub owner or repo name', 'INVALID_REPO', 400);
+  }
+
   return { owner, repo };
 };
 
@@ -142,12 +146,25 @@ export class GitHubCommitError extends Error {
   }
 }
 
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isRateLimited = (error: unknown): boolean => {
+  const status = getErrorStatus(error);
+  return status === 403 || status === 429;
+};
+
+const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9\-_.]+$/;
+
 export const initializeGitHubCommitSession = async (params: {
   projectName: string;
   sessionId: string;
   repoUrl: string;
   token: string;
 }): Promise<GitHubCommitSession> => {
+  if (!UUID_V4_REGEX.test(params.sessionId)) {
+    throw new GitHubCommitError('Invalid session ID format', 'API_FAILURE', 400);
+  }
+
   const { owner, repo } = parseRepoUrl(params.repoUrl);
   const octokit = new Octokit({ auth: params.token });
 
@@ -310,6 +327,14 @@ const commitSnapshot = async (
 
     treeSha = treeResponse.data.sha;
   } catch (error) {
+    if (isRateLimited(error)) {
+      const retryAfter = (error as { response?: { headers?: { 'retry-after'?: string } } }).response?.headers?.['retry-after'];
+      throw new GitHubCommitError(
+        `GitHub API rate limit exceeded${retryAfter ? ` (retry after ${retryAfter}s)` : ''}`,
+        'API_FAILURE',
+        429,
+      );
+    }
     const status = getErrorStatus(error);
     throw new GitHubCommitError('Failed to create commit tree', 'API_FAILURE', status ?? 502);
   }
@@ -326,6 +351,14 @@ const commitSnapshot = async (
 
     commitSha = commitResponse.data.sha;
   } catch (error) {
+    if (isRateLimited(error)) {
+      const retryAfter = (error as { response?: { headers?: { 'retry-after'?: string } } }).response?.headers?.['retry-after'];
+      throw new GitHubCommitError(
+        `GitHub API rate limit exceeded${retryAfter ? ` (retry after ${retryAfter}s)` : ''}`,
+        'API_FAILURE',
+        429,
+      );
+    }
     const status = getErrorStatus(error);
     throw new GitHubCommitError('Failed to create commit', 'API_FAILURE', status ?? 502);
   }
@@ -339,6 +372,14 @@ const commitSnapshot = async (
       force: false,
     });
   } catch (error) {
+    if (isRateLimited(error)) {
+      const retryAfter = (error as { response?: { headers?: { 'retry-after'?: string } } }).response?.headers?.['retry-after'];
+      throw new GitHubCommitError(
+        `GitHub API rate limit exceeded${retryAfter ? ` (retry after ${retryAfter}s)` : ''}`,
+        'API_FAILURE',
+        429,
+      );
+    }
     const status = getErrorStatus(error);
     throw new GitHubCommitError('Failed to update branch ref', 'API_FAILURE', status ?? 502);
   }
@@ -412,6 +453,10 @@ export const buildSnapshotFiles = async (params: {
   originalScreenshotReference: string | null;
   scoreHistory: ScoreHistoryEntry[];
 }): Promise<GitHubSnapshotFiles> => {
+  if (!UUID_V4_REGEX.test(params.sessionId)) {
+    throw new GitHubCommitError('Invalid session ID format', 'API_FAILURE', 400);
+  }
+
   const workspaceDir = path.join(TMP_ROOT, `${SESSION_DIR_PREFIX}${params.sessionId}`, 'workspace');
   const indexHtml =
     (await readFirstExistingFile([

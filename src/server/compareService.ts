@@ -103,7 +103,18 @@ export class CompareError extends Error {
   }
 }
 
-const OPENAI_URL = `${process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}/chat/completions`;
+const validateOpenAiBaseUrl = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') {
+      console.warn(`OPENAI_BASE_URL uses non-HTTPS protocol: ${parsed.protocol}`);
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    throw new Error(`Invalid OPENAI_BASE_URL: ${url}`);
+  }
+};
+const OPENAI_URL = `${validateOpenAiBaseUrl(process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1')}/chat/completions`;
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const OPENAI_MODEL = process.env.VISION_COMPARE_MODEL ?? process.env.OPENAI_VISION_MODEL ?? 'gpt-4o';
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_VISION_MODEL ?? 'claude-3-5-sonnet-latest';
@@ -114,6 +125,11 @@ const MAX_DIFF_ITEMS = 10;
 const MAX_SUGGESTION_ITEMS = 5;
 const SESSION_DIR_PREFIX = 'ralphton-';
 const TMP_ROOT = '/tmp';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_CACHE_SIZE = 500;
+
+const isValidSessionId = (value: string): boolean => UUID_RE.test(value);
 
 const visionCache = new Map<string, CacheEntry>();
 const visionLastCallBySession = new Map<string, number>();
@@ -451,6 +467,7 @@ const callOpenAiVision = async (originalPng: Buffer, generatedPng: Buffer): Prom
   });
 
   if (!response.ok) {
+    await response.text().catch(() => {});
     throw new CompareError(`OpenAI vision request failed with status ${response.status}`, 500, 'PROVIDER_FAILURE', {
       provider: 'openai',
       retryable: true,
@@ -520,6 +537,7 @@ const callAnthropicVision = async (originalPng: Buffer, generatedPng: Buffer): P
   });
 
   if (!response.ok) {
+    await response.text().catch(() => {});
     throw new CompareError(
       `Anthropic vision request failed with status ${response.status}`,
       500,
@@ -546,6 +564,11 @@ const cleanupVisionCache = (): void => {
   for (const [key, entry] of visionCache.entries()) {
     if (entry.expiresAt <= now) {
       visionCache.delete(key);
+    }
+  }
+  for (const [sessionId, timestamp] of visionLastCallBySession.entries()) {
+    if (now - timestamp > VISION_CACHE_TTL_MS) {
+      visionLastCallBySession.delete(sessionId);
     }
   }
 };
@@ -581,6 +604,10 @@ const appendVisualVerdict = async (
   verdict: VisionVerdict,
 ): Promise<void> => {
   if (!sessionId || iteration === undefined) {
+    return;
+  }
+
+  if (!isValidSessionId(sessionId)) {
     return;
   }
 
@@ -645,6 +672,12 @@ const compareVision = async (
       );
 
       if (cacheKey) {
+        if (visionCache.size >= MAX_CACHE_SIZE) {
+          const oldestKey = visionCache.keys().next().value;
+          if (oldestKey !== undefined) {
+            visionCache.delete(oldestKey);
+          }
+        }
         visionCache.set(cacheKey, {
           verdict,
           expiresAt: Date.now() + VISION_CACHE_TTL_MS,
@@ -714,7 +747,7 @@ export const compareScreenshots = async (input: CompareRequestInput): Promise<Co
     };
   }
 
-  console.warn('Vision comparison failed; falling back to pixel-only mode.');
+  // Vision provider unavailable or errored; degrade gracefully to pixel-only comparison.
   return {
     pixel: pixelResult,
     primaryScore: pixelResult.pixelScore,

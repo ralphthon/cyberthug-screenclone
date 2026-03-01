@@ -329,7 +329,16 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function normalizeWheelDelta(event: React.WheelEvent<HTMLDivElement>): number {
+function isSafeUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function normalizeWheelDelta(event: WheelEvent): number {
   if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
     return event.deltaY * 15;
   }
@@ -344,9 +353,10 @@ function normalizeWheelDelta(event: React.WheelEvent<HTMLDivElement>): number {
 function App(): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toastTimersRef = useRef<number[]>([]);
+  const nextToastIdRef = useRef(0);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
-  const processedEventIdsRef = useRef<Set<number>>(new Set());
+  const lastProcessedEventIdRef = useRef<number>(-1);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const newestAnchorRef = useRef<HTMLDivElement | null>(null);
   const isAtNewestRef = useRef(true);
@@ -737,7 +747,7 @@ function App(): JSX.Element {
   }, [orderedIterations]);
 
   const addToast = useCallback((message: string) => {
-    const toastId = Date.now() + Math.floor(Math.random() * 1000);
+    const toastId = ++nextToastIdRef.current;
     setToasts((previous) => [...previous, { id: toastId, message }]);
 
     const timerId = window.setTimeout(() => {
@@ -795,10 +805,10 @@ function App(): JSX.Element {
       if (messageEvent.lastEventId) {
         const id = Number(messageEvent.lastEventId);
         if (Number.isInteger(id)) {
-          if (processedEventIdsRef.current.has(id)) {
+          if (id <= lastProcessedEventIdRef.current) {
             return;
           }
-          processedEventIdsRef.current.add(id);
+          lastProcessedEventIdRef.current = id;
           normalizedEventId = id;
         }
       }
@@ -956,35 +966,49 @@ function App(): JSX.Element {
         return { added: 0, rejected: 0 };
       }
 
-      let remainingSlots = MAX_FILES - files.length;
-      if (remainingSlots <= 0) {
-        addToast('Maximum reached. Remove an image before adding more.');
-        return { added: 0, rejected: incomingFiles.length };
-      }
-
-      const acceptedFiles: File[] = [];
       let typeRejections = 0;
       let sizeRejections = 0;
       let overflowRejections = 0;
+      let added = 0;
+      let isAlreadyAtCapacity = false;
 
-      for (const file of incomingFiles) {
-        if (!ACCEPTED_FILE_TYPES.has(file.type)) {
-          typeRejections += 1;
-          continue;
+      setFiles((previous) => {
+        let remainingSlots = MAX_FILES - previous.length;
+        if (remainingSlots <= 0) {
+          isAlreadyAtCapacity = true;
+          return previous;
         }
 
-        if (file.size > MAX_FILE_SIZE_BYTES) {
-          sizeRejections += 1;
-          continue;
+        const acceptedFiles: File[] = [];
+
+        for (const file of incomingFiles) {
+          if (!ACCEPTED_FILE_TYPES.has(file.type)) {
+            typeRejections += 1;
+            continue;
+          }
+
+          if (file.size > MAX_FILE_SIZE_BYTES) {
+            sizeRejections += 1;
+            continue;
+          }
+
+          if (remainingSlots === 0) {
+            overflowRejections += 1;
+            continue;
+          }
+
+          acceptedFiles.push(file);
+          remainingSlots -= 1;
         }
 
-        if (remainingSlots === 0) {
-          overflowRejections += 1;
-          continue;
-        }
+        added = acceptedFiles.length;
 
-        acceptedFiles.push(file);
-        remainingSlots -= 1;
+        return acceptedFiles.length > 0 ? [...previous, ...acceptedFiles] : previous;
+      });
+
+      if (isAlreadyAtCapacity) {
+        addToast('Maximum reached. Remove an image before adding more.');
+        return { added: 0, rejected: incomingFiles.length };
       }
 
       if (typeRejections > 0) {
@@ -999,16 +1023,12 @@ function App(): JSX.Element {
         addToast('Only 5 screenshots can be uploaded at once.');
       }
 
-      if (acceptedFiles.length > 0) {
-        setFiles((previous) => [...previous, ...acceptedFiles]);
-      }
-
       return {
-        added: acceptedFiles.length,
+        added,
         rejected: typeRejections + sizeRejections + overflowRejections,
       };
     },
-    [addToast, files.length],
+    [addToast],
   );
 
   const handleDragOver = useCallback(
@@ -1155,7 +1175,7 @@ function App(): JSX.Element {
     }
 
     closeEventStream();
-    processedEventIdsRef.current.clear();
+    lastProcessedEventIdRef.current = -1;
 
     setLoopStatus('running');
     setConnectionStatus('connecting');
@@ -1176,7 +1196,8 @@ function App(): JSX.Element {
     setIsScoreChartExpanded(false);
     setIsCloneRunning(true);
 
-    window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(cloneConfig));
+    const { githubToken, ...persistableConfig } = cloneConfig;
+    window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(persistableConfig));
     setCloneConfigErrors({});
 
     try {
@@ -1378,7 +1399,7 @@ function App(): JSX.Element {
   const dropZoneDisabled = files.length >= MAX_FILES;
 
   const handleComparisonWheel = useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
+    (event: WheelEvent) => {
       if (!comparisonViewportRef.current) {
         return;
       }
@@ -1412,6 +1433,22 @@ function App(): JSX.Element {
     },
     [comparisonViewportRef],
   );
+
+  useEffect(() => {
+    const viewport = comparisonViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      handleComparisonWheel(event);
+    };
+
+    viewport.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      viewport.removeEventListener('wheel', handleWheel);
+    };
+  }, [handleComparisonWheel, currentComparisonIteration, currentComparisonImage, referencePreview]);
 
   const updateSliderPositionFromPointer = useCallback((clientX: number) => {
     const sliderCanvas = sliderCanvasRef.current;
@@ -1919,7 +1956,7 @@ function App(): JSX.Element {
                             </div>
                           ) : null}
 
-                          {card.commitUrl ? (
+                          {card.commitUrl && isSafeUrl(card.commitUrl) ? (
                             <p className="text-sm">
                               <a
                                 href={card.commitUrl}
@@ -2150,7 +2187,6 @@ function App(): JSX.Element {
                 className={`relative overflow-hidden rounded-xl border border-slate-700 bg-surface/70 ${
                   zoomScale > 1 ? 'cursor-grab active:cursor-grabbing' : 'cursor-zoom-in'
                 }`}
-                onWheel={handleComparisonWheel}
                 onPointerDown={beginPan}
                 onPointerMove={continuePan}
                 onPointerUp={endPan}
