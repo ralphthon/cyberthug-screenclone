@@ -84,8 +84,6 @@ const OLV_DEFAULT_IFRAME_URL = 'http://localhost:12393';
 const OLV_RECONNECT_BASE_DELAY_MS = 1_000;
 const OLV_RECONNECT_MAX_DELAY_MS = 30_000;
 const OLV_CONNECTION_TEST_TIMEOUT_MS = 3_000;
-const SPEECH_LOCK_TIMEOUT_MS = 3_000;
-const CHAT_SEND_LOCK_TIMEOUT_MS = 500;
 
 const LLM_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'openai-gpt-4o', label: 'OpenAI GPT-4o' },
@@ -133,7 +131,7 @@ const DEFAULT_OLV_CONFIG: OlvConfig = {
 
 const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
   {
-    id: 1,
+    id: 0,
     sender: 'cloney',
     text: 'Hi, I am Cloney. Share screenshots and tell me what to clone.',
     emotion: 'joy',
@@ -382,18 +380,16 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const reconnectTimerRef = useRef<number | null>(null);
   const celebrationResetTimerRef = useRef<number | null>(null);
   const celebrationExpressionTimerRef = useRef<number | null>(null);
-  const speechUnlockTimerRef = useRef<number | null>(null);
-  const sendUnlockTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const startupWarningEmittedRef = useRef(false);
   const manualCloseRef = useRef(false);
   const collapsedRef = useRef(false);
-  const isSpeakingRef = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const sessionBridgeRef = useRef<Map<string, string>>(new Map());
   const lastHandledLoopEventIdRef = useRef<number | null>(null);
   const lastMappedSessionIdRef = useRef<string | null>(null);
+  const messageIdRef = useRef(0);
   const openWaifuSessionIdRef = useRef<string>(
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -419,7 +415,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const [iframeReachable, setIframeReachable] = useState(true);
   const [iframeReloadKey, setIframeReloadKey] = useState(0);
   const [isVoiceMuted, setIsVoiceMuted] = useState(false);
-  const [isSending, setIsSending] = useState(false);
+  const isVoiceMutedRef = useRef(isVoiceMuted);
   const [isCompactViewport, setIsCompactViewport] = useState(() =>
     window.matchMedia('(max-width: 1023px)').matches,
   );
@@ -430,8 +426,13 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       return;
     }
 
-    contentWindow.postMessage(payload, '*');
-  }, []);
+    try {
+      const targetOrigin = new URL(appliedConfig.iframeUrl).origin;
+      contentWindow.postMessage(payload, targetOrigin);
+    } catch {
+      return;
+    }
+  }, [appliedConfig.iframeUrl]);
 
   const broadcastExpression = useCallback(
     (expressionIndex: number) => {
@@ -507,61 +508,30 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
     }, 3200);
   }, [broadcastExpression, clearCelebrationTimers, postMessageToIframe]);
 
-  const releaseSpeechLock = useCallback(() => {
-    isSpeakingRef.current = false;
-    if (speechUnlockTimerRef.current !== null) {
-      window.clearTimeout(speechUnlockTimerRef.current);
-      speechUnlockTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleSendUnlock = useCallback((delayMs = CHAT_SEND_LOCK_TIMEOUT_MS) => {
-    if (sendUnlockTimerRef.current !== null) {
-      window.clearTimeout(sendUnlockTimerRef.current);
-    }
-
-    sendUnlockTimerRef.current = window.setTimeout(() => {
-      sendUnlockTimerRef.current = null;
-      setIsSending(false);
-    }, delayMs);
-  }, []);
-
   const sendSystemSpeech = useCallback(
     (text: string, emotion: EmotionTag | null) => {
       const ws = websocketRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN || isVoiceMuted || isSpeakingRef.current) {
+      if (!ws || ws.readyState !== WebSocket.OPEN || isVoiceMutedRef.current) {
         return;
       }
 
-      isSpeakingRef.current = true;
-      if (speechUnlockTimerRef.current !== null) {
-        window.clearTimeout(speechUnlockTimerRef.current);
-      }
-      speechUnlockTimerRef.current = window.setTimeout(() => {
-        releaseSpeechLock();
-      }, SPEECH_LOCK_TIMEOUT_MS);
-
-      try {
-        ws.send(
-          JSON.stringify({
-            type: 'text-input',
-            sender: 'system',
-            text,
-            emotion: emotion ? `[${emotion}]` : undefined,
-            voice_enabled: !isVoiceMuted,
-            tts: {
-              engine: 'qwen3',
-              voice: appliedConfig.ttsVoice,
-              max_sentences: 2,
-              characteristics: TTS_CHARACTERISTICS[emotion ?? 'neutral'],
-            },
-          }),
-        );
-      } catch {
-        releaseSpeechLock();
-      }
+      ws.send(
+        JSON.stringify({
+          type: 'text-input',
+          sender: 'system',
+          text,
+          emotion: emotion ? `[${emotion}]` : undefined,
+          voice_enabled: !isVoiceMutedRef.current,
+          tts: {
+            engine: 'qwen3',
+            voice: appliedConfig.ttsVoice,
+            max_sentences: 2,
+            characteristics: TTS_CHARACTERISTICS[emotion ?? 'neutral'],
+          },
+        }),
+      );
     },
-    [appliedConfig.ttsVoice, isVoiceMuted, releaseSpeechLock],
+    [appliedConfig.ttsVoice],
   );
 
   const applyEmotionExpression = useCallback(
@@ -580,34 +550,37 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       emotion: EmotionTag | null,
       options?: { progressBadge?: string | null; voice?: boolean },
     ) => {
-    const nextText = text.trim();
-    if (nextText.length === 0) {
-      return;
-    }
+      const nextText = text.trim();
+      if (nextText.length === 0) {
+        return;
+      }
 
-    const nextMessage: ChatMessage = {
-      id: Date.now() + Math.floor(Math.random() * 1000),
-      sender,
-      text: nextText,
-      emotion,
-      progressBadge: options?.progressBadge ?? null,
-      createdAt: Date.now(),
-    };
+      const nextMessage: ChatMessage = {
+        id: ++messageIdRef.current,
+        sender,
+        text: nextText,
+        emotion,
+        progressBadge: options?.progressBadge ?? null,
+        createdAt: Date.now(),
+      };
 
-    setChatMessages((previous) => [...previous, nextMessage]);
+      setChatMessages((previous) => {
+        const next = [...previous, nextMessage];
+        return next.length > 200 ? next.slice(-200) : next;
+      });
 
-    if (sender === 'cloney' && emotion) {
-      applyEmotionExpression(emotion);
-    }
+      if (sender === 'cloney' && emotion) {
+        applyEmotionExpression(emotion);
+      }
 
-    if (sender === 'cloney' && options?.voice !== false) {
-      sendSystemSpeech(nextText, emotion);
-    }
+      if (sender === 'cloney' && options?.voice !== false) {
+        sendSystemSpeech(nextText, emotion);
+      }
 
-    if (sender === 'cloney' && collapsedRef.current) {
-      setUnreadCount((previous) => previous + 1);
-    }
-  },
+      if (sender === 'cloney' && collapsedRef.current) {
+        setUnreadCount((previous) => previous + 1);
+      }
+    },
     [applyEmotionExpression, sendSystemSpeech],
   );
 
@@ -619,9 +592,6 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       }
 
       if (messageType === 'display_text') {
-        releaseSpeechLock();
-        setIsSending(false);
-
         if (parseString(payload.sender) === 'system') {
           return;
         }
@@ -650,17 +620,11 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       }
 
       if (messageType === 'audio-play-start') {
-        setIsSending(false);
         const summary = parseString(payload.text) ?? 'Audio response started.';
         appendMessage('system', summary, null);
-        return;
-      }
-
-      if (messageType === 'audio-play-end') {
-        releaseSpeechLock();
       }
     },
-    [appendMessage, postMessageToIframe, releaseSpeechLock],
+    [appendMessage, postMessageToIframe],
   );
 
   const closeWebSocket = useCallback(() => {
@@ -753,6 +717,10 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   }, [isVoiceMuted]);
 
   useEffect(() => {
+    isVoiceMutedRef.current = isVoiceMuted;
+  }, [isVoiceMuted]);
+
+  useEffect(() => {
     if (isPanelCollapsed) {
       return;
     }
@@ -770,6 +738,14 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
 
   useEffect(() => {
     const handleWindowMessage = (event: MessageEvent<unknown>) => {
+      try {
+        if (event.origin !== new URL(appliedConfig.iframeUrl).origin) {
+          return;
+        }
+      } catch {
+        return;
+      }
+
       if (!event.data || typeof event.data !== 'object' || Array.isArray(event.data)) {
         return;
       }
@@ -781,18 +757,13 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
     return () => {
       window.removeEventListener('message', handleWindowMessage);
     };
-  }, [handleBridgePayload]);
+  }, [appliedConfig.iframeUrl, handleBridgePayload]);
 
   useEffect(() => {
     return () => {
       clearCelebrationTimers();
-      releaseSpeechLock();
-      if (sendUnlockTimerRef.current !== null) {
-        window.clearTimeout(sendUnlockTimerRef.current);
-        sendUnlockTimerRef.current = null;
-      }
     };
-  }, [clearCelebrationTimers, releaseSpeechLock]);
+  }, [clearCelebrationTimers]);
 
   useEffect(() => {
     manualCloseRef.current = false;
@@ -954,7 +925,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
       const maxIterations = parseNumber(loopEvent.payload.maxIterations);
       const iterationLabel =
         iteration !== null && maxIterations !== null ? `${iteration}/${maxIterations}` : '다음 반복';
-      appendMessage('cloney', `시작할게~ ${iterationLabel} 반복 진행 중이야.`, 'joy', { voice: false });
+      appendMessage('cloney', `시작할게~ ${iterationLabel} 반복 진행 중이야.`, 'joy');
       return;
     }
 
@@ -980,7 +951,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
 
       if (loopEvent.event === 'loop-error') {
         const errorText = parseString(loopEvent.payload.error) ?? '알 수 없는 오류가 발생했어.';
-        appendMessage('cloney', `문제가 생겼어. ${errorText} 다시 시도해볼까?`, 'fear', { voice: false });
+        appendMessage('cloney', `문제가 생겼어. ${errorText} 다시 시도해볼까?`, 'fear');
       }
     }, [appendMessage, bridge.latestLoopEvent, bridge.screencloneSessionId, mapSessionIdToOpenWaifu, triggerCelebration]);
 
@@ -1187,35 +1158,26 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
   const handleChatSubmit = useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (isSending) {
-        return;
-      }
 
       const trimmed = chatInput.trim();
       if (trimmed.length === 0) {
         return;
       }
 
-      setIsSending(true);
       appendMessage('user', trimmed, null);
       setChatInput('');
 
       const intent = detectBridgeIntent(trimmed);
       if (intent) {
-        void (async () => {
-          try {
-            await handleBridgeIntent(intent);
-          } finally {
-            scheduleSendUnlock();
-          }
-        })();
+        handleBridgeIntent(intent).catch((error) => {
+          appendMessage('system', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`, null);
+        });
         return;
       }
 
       sendTextInput(trimmed);
-      scheduleSendUnlock();
     },
-    [appendMessage, chatInput, handleBridgeIntent, isSending, scheduleSendUnlock, sendTextInput],
+    [appendMessage, chatInput, handleBridgeIntent, sendTextInput],
   );
 
   const handleChatPaste = useCallback(
@@ -1365,6 +1327,7 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
                     type={showApiKey ? 'text' : 'password'}
                     value={olvConfig.llmApiKey}
                     onChange={(event) => handleConfigChange('llmApiKey', event.target.value)}
+                    autoComplete="off"
                     className="w-full bg-transparent text-sm text-slate-100 outline-none"
                     placeholder="sk-..."
                   />
@@ -1430,7 +1393,9 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
               <button
                 type="button"
                 onClick={() => {
-                  void handleSaveSettings();
+                  handleSaveSettings().catch((error) => {
+                    appendMessage('system', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`, null);
+                  });
                 }}
                   disabled={saveState === 'saving'}
                   className="rounded-md border border-indigo-500/50 bg-indigo-500/20 px-2.5 py-1.5 text-xs font-semibold text-indigo-100 transition hover:bg-indigo-500/30 disabled:opacity-60"
@@ -1505,7 +1470,12 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
 
         <section className="min-h-0 flex-1 px-4 py-3">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Chat History</h3>
-          <div ref={chatScrollRef} className="h-full max-h-[240px] overflow-y-auto rounded-lg border border-slate-700 bg-surface/60 p-3">
+          <div
+            ref={chatScrollRef}
+            role="log"
+            aria-live="polite"
+            className="h-full max-h-[240px] overflow-y-auto rounded-lg border border-slate-700 bg-surface/60 p-3"
+          >
             <div className="space-y-2">
               {chatMessages.map((message) => {
                 const isUser = message.sender === 'user';
@@ -1547,13 +1517,12 @@ function CloneyPanel({ bridge }: CloneyPanelProps): JSX.Element {
               value={chatInput}
               onChange={(event) => setChatInput(event.target.value)}
               onPaste={handleChatPaste}
-              disabled={isSending}
+              aria-label="Chat message"
               placeholder="Message Cloney..."
               className="w-full rounded-md border border-slate-700 bg-surface/90 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-indigo-400"
             />
             <button
               type="submit"
-              disabled={isSending}
               className="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400"
             >
               Send
