@@ -215,6 +215,14 @@ vi.mock('multer', () => ({
   default: indexMocks.multerFactory,
 }));
 
+vi.mock('express-rate-limit', () => ({
+  default: vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
+}));
+
+vi.mock('helmet', () => ({
+  default: vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
+}));
+
 vi.mock('node:net', () => ({
   createConnection: indexMocks.createConnection,
 }));
@@ -364,7 +372,7 @@ describe('server API routes', () => {
     await handler(
       {
         body: {
-          sessionId: '  session-123  ',
+          sessionId: '  a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11  ',
           imageIndex: '1',
         },
       },
@@ -373,7 +381,7 @@ describe('server API routes', () => {
     );
 
     expect(indexMocks.analyzeSessionScreenshots).toHaveBeenCalledWith({
-      sessionId: 'session-123',
+      sessionId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
       imageIndex: 1,
     });
     expect(response.statusCode).toBe(200);
@@ -457,7 +465,7 @@ describe('server API routes', () => {
           original: Buffer.from('original').toString('base64'),
           generated: Buffer.from('generated').toString('base64'),
           mode: 'both',
-          sessionId: '  session-compare  ',
+          sessionId: '  b1ffcd00-ad1c-4ef9-bc7e-7cc0ce491b22  ',
           iteration: '3',
         },
       },
@@ -469,7 +477,7 @@ describe('server API routes', () => {
       original: Buffer.from('original').toString('base64'),
       generated: Buffer.from('generated').toString('base64'),
       mode: 'both',
-      sessionId: 'session-compare',
+      sessionId: 'b1ffcd00-ad1c-4ef9-bc7e-7cc0ce491b22',
       iteration: 3,
     });
     expect(response.statusCode).toBe(200);
