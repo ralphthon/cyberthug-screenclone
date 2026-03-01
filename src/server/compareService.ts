@@ -103,8 +103,10 @@ export class CompareError extends Error {
   }
 }
 
-const OPENAI_URL = `${process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}/chat/completions`;
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
+const OPENAI_URL = `${(process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/+$/, '')}/chat/completions`;
+const ANTHROPIC_URL = process.env.ANTHROPIC_BASE_URL
+  ? `${process.env.ANTHROPIC_BASE_URL.replace(/\/+$/, '')}/v1/messages`
+  : 'https://api.anthropic.com/v1/messages';
 const OPENAI_MODEL = process.env.VISION_COMPARE_MODEL ?? process.env.OPENAI_VISION_MODEL ?? 'gpt-4o';
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_VISION_MODEL ?? 'claude-3-5-sonnet-latest';
 const VISION_TIMEOUT_MS = 60_000;
@@ -388,7 +390,7 @@ const comparePixels = (images: NormalizedImages): PixelComparison => {
 
 const resolveProviderOrder = (): Provider[] => {
   const hasOpenAi = Boolean(process.env.OPENAI_API_KEY);
-  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
+  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN);
 
   if (hasOpenAi && hasAnthropic) {
     return ['openai', 'anthropic'];
@@ -475,7 +477,7 @@ const callOpenAiVision = async (originalPng: Buffer, generatedPng: Buffer): Prom
 };
 
 const callAnthropicVision = async (originalPng: Buffer, generatedPng: Buffer): Promise<VisionVerdict> => {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN;
   if (!apiKey) {
     throw new CompareError('ANTHROPIC_API_KEY is not configured', 500, 'PROVIDER_UNAVAILABLE');
   }

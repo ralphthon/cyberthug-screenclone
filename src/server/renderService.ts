@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import puppeteer, { type Browser, type HTTPRequest } from 'puppeteer-core';
@@ -42,6 +43,9 @@ const CHROMIUM_CANDIDATE_PATHS = [
   '/usr/bin/chromium-browser',
   '/usr/bin/google-chrome-stable',
   '/usr/bin/google-chrome',
+  '/snap/bin/chromium',
+  '/usr/local/bin/chromium-browser',
+  '/usr/local/bin/google-chrome',
 ];
 
 const findCachedPuppeteerChrome = async (): Promise<string | null> => {
@@ -179,6 +183,18 @@ const resolveExecutablePath = async (): Promise<string> => {
   const cachedChrome = await findCachedPuppeteerChrome();
   if (cachedChrome) {
     return cachedChrome;
+  }
+
+  for (const name of ['chromium', 'google-chrome', 'chromium-browser']) {
+    try {
+      const resolved = execSync(`which ${name}`, { encoding: 'utf8' }).trim();
+      if (resolved) {
+        await fs.access(resolved, fsConstants.X_OK);
+        return resolved;
+      }
+    } catch {
+      // Not found via which, try next.
+    }
   }
 
   throw new RenderError(

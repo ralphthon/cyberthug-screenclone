@@ -98,7 +98,7 @@ const TMP_ROOT = '/tmp';
 const MAX_IMAGES = 5;
 const ANALYZE_TIMEOUT_MS = 60_000;
 const CACHE_TTL_MS = 10 * 60 * 1000;
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
 const OPENAI_URL = process.env.OPENAI_BASE_URL
   ? `${process.env.OPENAI_BASE_URL.replace(/\/+$/, '')}/chat/completions`
   : 'https://api.openai.com/v1/chat/completions';
@@ -242,6 +242,12 @@ const detectMimeTypeFromPath = (filePath: string): string | null => {
   }
   if (extension === '.webp') {
     return 'image/webp';
+  }
+  if (extension === '.gif') {
+    return 'image/gif';
+  }
+  if (extension === '.bmp') {
+    return 'image/bmp';
   }
 
   return null;

@@ -951,6 +951,8 @@ const getLoopGeneratedHtml = async (sessionId: string): Promise<string | null> =
     path.join(workspaceDir, 'index.html'),
     path.join(workspaceDir, 'generated', 'index.html'),
     path.join(workspaceDir, 'output', 'index.html'),
+    path.join(workspaceDir, 'ralph-runtime', 'index.html'),
+    path.join(workspaceDir, 'src', 'index.html'),
   ];
 
   for (const candidatePath of candidatePaths) {
@@ -962,6 +964,30 @@ const getLoopGeneratedHtml = async (sessionId: string): Promise<string | null> =
     } catch {
       // Continue searching candidate output files.
     }
+  }
+
+  try {
+    const findIndexHtml = async (dir: string, depth: number): Promise<string | null> => {
+      if (depth > 3) return null;
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name === 'index.html') {
+          const html = await fs.readFile(path.join(dir, entry.name), 'utf8');
+          if (html.trim().length > 0) return html;
+        }
+      }
+      for (const entry of entries) {
+        if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== '.git') {
+          const result = await findIndexHtml(path.join(dir, entry.name), depth + 1);
+          if (result) return result;
+        }
+      }
+      return null;
+    };
+    const found = await findIndexHtml(workspaceDir, 0);
+    if (found) return found;
+  } catch {
+    // Recursive search is best-effort.
   }
 
   return null;

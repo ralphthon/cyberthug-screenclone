@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, execSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { watch, type FSWatcher } from 'node:fs';
 import { promises as fs } from 'node:fs';
@@ -46,7 +46,6 @@ type SessionRuntime = {
   readingProgress: boolean;
   finalized: boolean;
   stopRequested: boolean;
-  completionMarkerBuffer: string;
   workspaceDir: string;
   runtimeDir: string;
   progressFilePath: string;
@@ -111,7 +110,6 @@ const createEmptyRuntime = (sessionId: string): SessionRuntime => {
     readingProgress: false,
     finalized: false,
     stopRequested: false,
-    completionMarkerBuffer: '',
     workspaceDir,
     runtimeDir,
     progressFilePath,
@@ -202,10 +200,24 @@ const buildInitialProgressLog = (sessionId: string, config: RalphStartConfig): s
   ].join('\n');
 };
 
+const resolveRalphTool = (): string => {
+  const candidates = ['omx', 'claude', 'codex', 'amp'];
+  for (const tool of candidates) {
+    try {
+      execSync(`which ${tool}`, { stdio: 'ignore' });
+      return tool;
+    } catch {
+      // Tool not found, try next.
+    }
+  }
+  return 'claude';
+};
+
 export class RalphProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRuntime>();
   private readonly maxConcurrentSessions: number;
   private readonly ralphTemplateDir: string;
+  private readonly resolvedTool: string;
 
   constructor() {
     super();
@@ -214,6 +226,7 @@ export class RalphProcessManager extends EventEmitter {
       DEFAULT_MAX_CONCURRENT_SESSIONS,
     );
     this.ralphTemplateDir = path.resolve(process.cwd(), 'scripts/ralph');
+    this.resolvedTool = resolveRalphTool();
   }
 
   public async start(sessionId: string, config: RalphStartConfig): Promise<RalphSessionStatus> {
@@ -516,7 +529,7 @@ export class RalphProcessManager extends EventEmitter {
 
   private spawnRalphProcess(runtime: SessionRuntime): ChildProcessWithoutNullStreams {
     const scriptPath = path.join(runtime.runtimeDir, 'ralph.sh');
-    const args = ['--tool', 'omx', '--images-dir', runtime.sessionImagesDir, String(runtime.maxIterations)];
+    const args = ['--tool', this.resolvedTool, '--images-dir', runtime.sessionImagesDir, String(runtime.maxIterations)];
 
     const child = spawn(scriptPath, args, {
       cwd: runtime.workspaceDir,
@@ -576,11 +589,8 @@ export class RalphProcessManager extends EventEmitter {
       }
     }
 
-    const COMPLETION_MARKER = '<promise>COMPLETE</promise>';
-    runtime.completionMarkerBuffer = (runtime.completionMarkerBuffer + chunkText).slice(-(COMPLETION_MARKER.length * 2));
-    if (runtime.completionMarkerBuffer.includes(COMPLETION_MARKER)) {
-      this.finalize(runtime, 'completed', 'completion-marker-detected');
-    }
+    // Completion is determined by clean process exit (code 0) rather than stdout markers.
+    // ralph.sh handles its own PRD validation before exiting.
   }
 
   private pushOutput(runtime: SessionRuntime, line: string): void {
