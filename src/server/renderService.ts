@@ -1,5 +1,4 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
-import path from 'node:path';
 import puppeteer, { type Browser, type HTTPRequest } from 'puppeteer-core';
 
 export type RenderRequestInput = {
@@ -43,29 +42,6 @@ const CHROMIUM_CANDIDATE_PATHS = [
   '/usr/bin/google-chrome-stable',
   '/usr/bin/google-chrome',
 ];
-
-const findCachedPuppeteerChrome = async (): Promise<string | null> => {
-  const cacheDir = path.join(process.env.HOME ?? '/root', '.cache', 'puppeteer', 'chrome');
-  try {
-    const entries = await fs.readdir(cacheDir);
-    const linuxDirs = entries
-      .filter((e) => e.startsWith('linux-'))
-      .sort()
-      .reverse();
-    for (const dir of linuxDirs) {
-      const candidate = path.join(cacheDir, dir, 'chrome-linux64', 'chrome');
-      try {
-        await fs.access(candidate, fsConstants.X_OK);
-        return candidate;
-      } catch {
-        // Try next version.
-      }
-    }
-  } catch {
-    // Cache directory doesn't exist.
-  }
-  return null;
-};
 
 let browserPromise: Promise<Browser> | null = null;
 let browserInstance: Browser | null = null;
@@ -146,7 +122,15 @@ const isAllowedRequest = (request: HTTPRequest): boolean => {
 
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'about:' || parsed.protocol === 'data:' || parsed.protocol === 'blob:';
+    if (parsed.protocol === 'about:') {
+      return true;
+    }
+    if (parsed.protocol === 'data:') {
+      const mimeMatch = url.match(/^data:([^;,]+)/);
+      const mime = mimeMatch?.[1]?.toLowerCase() ?? '';
+      return mime.startsWith('image/') || mime.startsWith('font/');
+    }
+    return false;
   } catch {
     return false;
   }
@@ -176,11 +160,6 @@ const resolveExecutablePath = async (): Promise<string> => {
     }
   }
 
-  const cachedChrome = await findCachedPuppeteerChrome();
-  if (cachedChrome) {
-    return cachedChrome;
-  }
-
   throw new RenderError(
     'No Chromium executable found. Set PUPPETEER_EXECUTABLE_PATH to a valid browser binary.',
     503,
@@ -189,6 +168,11 @@ const resolveExecutablePath = async (): Promise<string> => {
 };
 
 const getBrowser = async (): Promise<Browser> => {
+  if (browserInstance && !browserInstance.connected) {
+    browserInstance = null;
+    browserPromise = null;
+  }
+
   if (browserInstance && browserInstance.connected) {
     return browserInstance;
   }
@@ -278,10 +262,19 @@ const renderOnce = async (input: Required<RenderRequestInput>): Promise<RenderRe
       await sleep(input.waitMs);
     }
 
+    const bodyHeight = await page.evaluate('document.body.scrollHeight') as number;
+    const maxHeight = 8192;
+    const clampHeight = bodyHeight > maxHeight;
+
+    if (clampHeight) {
+      await page.setViewport({ width: input.width, height: maxHeight });
+    }
+
     const screenshotBuffer = (await page.screenshot({
       type: 'png',
-      fullPage: true,
-      captureBeyondViewport: true,
+      ...(clampHeight
+        ? { clip: { x: 0, y: 0, width: input.width, height: maxHeight } }
+        : { fullPage: true, captureBeyondViewport: true }),
     })) as Buffer;
 
     return {
